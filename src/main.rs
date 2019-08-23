@@ -1,37 +1,65 @@
+use std::sync::mpsc;
+use std::thread;
 use std::time::Instant;
+
+static THREAD_NUM: u64 = 4;
+static SLICE_NUM: u64 = 10000000;
+
+struct Stat {
+    max: usize,
+    count: Vec<u32>,
+}
 
 fn main() {
     let start = Instant::now();
 
+    let (tx, rx) = mpsc::channel();
+
+    for threadid in 0..THREAD_NUM {
+        let c_tx = mpsc::Sender::clone(&tx);
+        thread::spawn(move || {
+            println!("Thread {} start...", threadid);
+            let n = SLICE_NUM/THREAD_NUM;
+            for index in 0..n {
+                let mobile: u64 = 13800000000 + n*threadid + index;
+                let m_hash = mobile_to_md5(mobile) as usize;
+                c_tx.send(m_hash).unwrap();
+            }
+            println!("Thread {} completed.", threadid);
+        });
+    }
+    drop(tx);
+
     let mut v = alloc_big_vec(u32::max_value() as usize + 1);
+    let mut stat = Stat {
+        max: 0,
+        count: vec![0; 10],
+    };
 
-    let mut max = 0;
-    let mut stat: Vec<u32> = Vec::with_capacity(10);
-    unsafe {
-        stat.set_len(10);
-    }
-
-    for index in 0..100000000 {
-        let mobile: u64 = index + 13800000000;
-        let m_hash = mobile_to_md5(mobile) as usize;
+    for m_hash in rx {
+        let stat_index = v[m_hash] as usize;
         v[m_hash] = v[m_hash] + 1;
-        let stat_index = (v[m_hash] - 1) as usize;
-        stat[stat_index] = stat[stat_index] + 1;
-        if stat_index > 1 {
-            stat[stat_index - 1] = stat[stat_index - 1] + 1;
+
+        stat.count[stat_index] += 1;
+        if stat_index > 0 {
+            stat.count[stat_index - 1] -= 1;
         }
-        if stat_index > max {
-            max = stat_index
+
+        if stat_index + 1 > stat.max {
+            stat.max += 1;
         }
     }
-    println!("{}", max);
-    for i in 0..max {
-        println!("{}", stat[i]);
+
+    println!("{}", stat.max);
+    for i in 0..stat.max {
+        println!("{}", stat.count[i]);
     }
+
     println!("It costs: {:?}", start.elapsed());
 }
 
 fn alloc_big_vec(len: usize) -> Vec<u32> {
+    // let v: Vec<u32> = vec![0; len];
     let mut v: Vec<u32> = Vec::with_capacity(len);
     unsafe {
         v.set_len(len);
