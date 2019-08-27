@@ -1,16 +1,19 @@
 use buffered_reader;
 use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
+use console::Term;
 use std::fs::File;
+use std::io::BufWriter;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
-use std::io::BufWriter;
 
 // some const
 const THREAD_NUM: usize = 4;
-const PREFIX_LEN: usize = 42;
-const PREFIX_LIST: [usize; PREFIX_LEN] = [134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188, 198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176, 185, 186, 170, 171];
-const MOBILE_SPAN_LEN: usize = 100000000;
+const PREFIX_LEN: usize = 1;
+const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
+// const PREFIX_LEN: usize = 42;
+// const PREFIX_LIST: [usize; PREFIX_LEN] = [134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188, 198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176, 185, 186, 170, 171];
+const MOBILE_SPAN_LEN: usize = 1000000;
 const TOTAL_NUM: usize = PREFIX_LEN * MOBILE_SPAN_LEN;
 const SLICE_LEN: usize = u16::max_value() as usize + 1;
 const SLICE_NUM: usize = TOTAL_NUM / SLICE_LEN + 1;
@@ -26,19 +29,21 @@ fn main() {
     let mut v = alloc_big_vec(TOTAL_NUM);
 
     build_formula(&mut v);
-    write_formula_to_file(&v);
+    // write_formula_to_file(&v);
 
-    read_formula_from_file(&mut v);
-    look_up(&v);
+    // read_formula_from_file(&mut v);
+    // look_up(&v);
 }
 
 fn build_formula(v: &mut Vec<Pair>) {
     let start = Instant::now();
-
+    println!("Start to build formula ...");
+ 
     let (tx, rx) = mpsc::channel();
 
     let mut thread_slice_array = [(0, 0); THREAD_NUM]; // each thread's slice (start, length)
     for threadid in 0..THREAD_NUM {
+        println!("");
         // assign slices to threads
         let mut thread_slice_num = SLICE_NUM / THREAD_NUM;
         if threadid < SLICE_NUM % THREAD_NUM {
@@ -54,52 +59,60 @@ fn build_formula(v: &mut Vec<Pair>) {
         //create threads
         let c_tx = mpsc::Sender::clone(&tx);
         thread::spawn(move || {
-            println!("Thread {} start...", threadid);
+            let term = Term::stdout();
+            // alloc local thread memory
+            let mut v_thread = alloc_big_vec(SLICE_LEN);
+            // work on each slice
             for thread_slice in 0..thread_slice_array[threadid].1 {
                 let slice = thread_slice_array[threadid].0 + thread_slice;
+                // cumpute md5 hash
                 for mobile_index in 0..SLICE_LEN {
                     let address = slice * SLICE_LEN + mobile_index;
                     if address < TOTAL_NUM {
                         let mobile = address_to_mobile(address);
                         let m_md5 = mobile_to_md5(mobile);
-                        // println!("{},{},{},{}", threadid, address, mobile, m_md5);
-                        c_tx.send((address, mobile_index as u16, m_md5)).unwrap();
+                        v_thread[mobile_index].md5 = m_md5;
+                        v_thread[mobile_index].mobile_index = mobile_index as u16;
                     }
                 }
-                // send total_num as address to indicate the end of a slice
-                c_tx.send((TOTAL_NUM, slice as u16, 0)).unwrap();
-                // println!("Thread {} slice {} completed.", threadid, slice);
+                // sort each slice
+                v_thread.sort_by(|a, b| a.md5.cmp(&b.md5));
+
+                // send to main thread
+                for mobile_index in 0..SLICE_LEN {
+                    let address = slice * SLICE_LEN + mobile_index;
+                    c_tx.send((
+                        address,
+                        v_thread[mobile_index].mobile_index,
+                        v_thread[mobile_index].md5,
+                    ))
+                    .unwrap();
+                }
+                // print progress
+                term.move_cursor_down(THREAD_NUM).unwrap();
+                term.move_cursor_up(THREAD_NUM - threadid).unwrap();
+                term.clear_line().unwrap();
+                term.write_str(&format!("Thread {} slice {}/{} completed.", threadid, thread_slice, thread_slice_array[threadid].1)).unwrap();
             }
-            println!(
-                "# Thread {} completed after {:?}.",
-                threadid,
-                start.elapsed()
-            );
+            term.move_cursor_down(THREAD_NUM).unwrap();
+            term.move_cursor_up(THREAD_NUM - threadid).unwrap();
+            term.clear_line().unwrap();
+            term.write_str(&format!("Thread {} completed after {:?}.", threadid, start.elapsed())).unwrap();
         });
     }
     drop(tx);
 
     // recieve results from threads
-    let mut count = 0;
     for (address, mobile_index, m_md5) in rx {
         if address < TOTAL_NUM {
-            count += 1;
             v[address].md5 = m_md5;
             v[address].mobile_index = mobile_index;
-        } else {
-            // println!("slice {} completed.", index);
-            // sort each slice
-            let slice_start = mobile_index as usize * SLICE_LEN;
-            let mut slice_end = slice_start + SLICE_LEN;
-            if slice_end > TOTAL_NUM {
-                slice_end = TOTAL_NUM;
-            }
-            let v_slice = &mut v[slice_start..slice_end];
-            v_slice.sort_by(|a, b| a.md5.cmp(&b.md5));
         }
     }
-    println!("{}", count);
 
+    let term = Term::stdout();
+    term.move_cursor_down(THREAD_NUM).unwrap();
+    term.clear_line().unwrap();
     println!(
         "# Main thread formula completed after {:?}",
         start.elapsed()
