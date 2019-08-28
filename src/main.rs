@@ -9,14 +9,14 @@ use std::time::Instant;
 
 // some const
 const THREAD_NUM: usize = 4;
-// const PREFIX_LEN: usize = 1;
-// const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
-const PREFIX_LEN: usize = 42;
-const PREFIX_LIST: [usize; PREFIX_LEN] = [
-    134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188,
-    198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176,
-    185, 186, 170, 171,
-];
+const PREFIX_LEN: usize = 1;
+const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
+// const PREFIX_LEN: usize = 42;
+// const PREFIX_LIST: [usize; PREFIX_LEN] = [
+//     134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188,
+//     198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176,
+//     185, 186, 170, 171,
+// ];
 const MOBILE_SPAN_LEN: usize = 100000000;
 const TOTAL_NUM: usize = PREFIX_LEN * MOBILE_SPAN_LEN;
 const SLICE_LEN: usize = u16::max_value() as usize + 1;
@@ -29,20 +29,20 @@ struct Pair {
 }
 
 fn main() {
-    build_formula();
-
-    let mut v = alloc_big_vec(TOTAL_NUM);
-    read_formula_from_file(&mut v);
-    look_up(&v);
+    // alloc memory
+    let v_mutex = Arc::new(Mutex::new(alloc_big_vec(TOTAL_NUM)));
+    // build_formula(&v_mutex);
+    // write_formula_to_file(&v_mutex);
+    read_formula_from_file(&v_mutex);
+    let digest = md5::compute("13498506456".to_string());
+    look_up(&v_mutex, digest);
 }
 
-fn build_formula() {
+fn build_formula(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
     let start = Instant::now();
     println!("Start to build formula ...");
     let (tx, rx) = mpsc::channel();
 
-    // alloc memory
-    let v_mutex = Arc::new(Mutex::new(alloc_big_vec(TOTAL_NUM)));
     let mut thread_slice_array = [(0, 0); THREAD_NUM]; // each thread's slice (start, length)
     for threadid in 0..THREAD_NUM {
         println!("Thread {} starting ...", threadid);
@@ -60,7 +60,7 @@ fn build_formula() {
 
         //create threads
         let v_clone = v_mutex.clone();
-        let clone_tx = mpsc::Sender::clone(&tx);
+        let tx_clone = mpsc::Sender::clone(&tx);
         thread::spawn(move || {
             // alloc local thread memory
             let mut v_thread = alloc_big_vec(SLICE_LEN);
@@ -90,25 +90,25 @@ fn build_formula() {
                     }
                 }
 
-                // send to main thread
-                clone_tx.send((threadid, thread_slice)).unwrap();
+                // send progress to main thread
+                tx_clone.send((threadid, thread_slice)).unwrap();
             }
         });
     }
     drop(tx);
 
-    // recieve results from threads
+    // recieve progress from threads
     let term = Term::stdout();
     for (threadid, thread_slice) in rx {
         // print progress
         term.move_cursor_up(THREAD_NUM - threadid).unwrap();
         term.clear_line().unwrap();
         term.write_str(&format!(
-            "Thread {} slice {}/{} completed. @{}s",
+            "Thread {} slice {}/{} completed. @{:?}",
             threadid,
             thread_slice + 1,
             thread_slice_array[threadid].1,
-            start.elapsed().as_secs()
+            start.elapsed()
         ))
         .unwrap();
         term.move_cursor_down(THREAD_NUM - threadid).unwrap();
@@ -116,12 +116,9 @@ fn build_formula() {
     }
 
     println!(
-        "# Main thread formula completed after {}s",
-        start.elapsed().as_secs()
+        "# Main thread formula completed after {:?}",
+        start.elapsed()
     );
-
-    //
-    write_formula_to_file(&v_mutex.clone().lock().unwrap());
 }
 
 fn alloc_big_vec(len: usize) -> Vec<Pair> {
@@ -152,12 +149,15 @@ fn restore_mobile(mobile_index: u16, slice: usize) -> u64 {
     address_to_mobile(address)
 }
 
-fn look_up(v: &Vec<Pair>) {
+fn look_up(v_mutex: &Arc<Mutex<Vec<Pair>>>, digest: md5::Digest) {
     let start = Instant::now();
 
-    let digest = md5::compute("1473856456".to_string());
+    let v_clone = v_mutex.clone();
+    let v = v_clone.lock().unwrap();
     let m_md5 = digest_to_md5(digest);
+    let mut found = false;
     for slice in 0..SLICE_NUM {
+        if found { break; }
         // look up in each slice
         let slice_start = slice * SLICE_LEN;
         let mut slice_end = slice_start + SLICE_LEN;
@@ -181,6 +181,7 @@ fn look_up(v: &Vec<Pair>) {
                     // println!("{},{},{}", slice, mobile_index, mobile);
                     if md5::compute(mobile.to_string()) == digest {
                         println!("## found {}", mobile);
+                        found = true;
                     }
                     i -= 1;
                 }
@@ -194,26 +195,48 @@ fn look_up(v: &Vec<Pair>) {
     println!("Look up costed {:?}", start.elapsed());
 }
 
-fn write_formula_to_file(v: &Vec<Pair>) {
+fn write_formula_to_file(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
     let start = Instant::now();
+    let v_clone = v_mutex.clone();
+    let v = v_clone.lock().unwrap();
+    let term = Term::stdout();
+    let mut percent = 0;
+    term.write_str(&format!("Writing formula to file ...{}%", percent)).unwrap();
 
     // write md5 then mobile brings better compress ratio
     // however it increases memory access costs
     let mut file = BufWriter::new(File::create("formula.dat").unwrap());
-    for pair in v {
-        file.write_u16::<NativeEndian>(pair.md5).unwrap();
-        file.write_u16::<NativeEndian>(pair.mobile_index).unwrap();
+    for i in 0..TOTAL_NUM {
+        file.write_u16::<NativeEndian>(v[i].md5).unwrap();
+        file.write_u16::<NativeEndian>(v[i].mobile_index).unwrap();
+        let done = (i+1)*100/TOTAL_NUM;
+        if done > percent {
+            percent = done;
+            term.clear_line().unwrap();
+            term.write_str(&format!("Writing formula to file ...{}%", percent)).unwrap();
+        }
     }
-    println!("Write formula costed {:?}", start.elapsed());
+    println!("\n# Write formula costed {:?}", start.elapsed());
 }
 
-fn read_formula_from_file(v: &mut Vec<Pair>) {
+fn read_formula_from_file(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
     let start = Instant::now();
+    let v_clone = v_mutex.clone();
+    let mut v = v_clone.lock().unwrap();
+    let term = Term::stdout();
+    let mut percent = 0;
+    term.write_str(&format!("Reading formula from file ...{}%", percent)).unwrap();
 
     let mut file = buffered_reader::File::open("formula.dat").unwrap();
     for i in 0..TOTAL_NUM {
         v[i].md5 = file.read_u16::<NativeEndian>().unwrap();
         v[i].mobile_index = file.read_u16::<NativeEndian>().unwrap();
+        let done = (i+1)*100/TOTAL_NUM;
+        if done > percent {
+            percent = done;
+            term.clear_line().unwrap();
+            term.write_str(&format!("Reading formula from file ...{}%", percent)).unwrap();
+        }
     }
-    println!("Read formula costed {:?}", start.elapsed());
+    println!("\n# Read formula costed {:?}", start.elapsed());
 }
