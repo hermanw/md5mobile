@@ -3,17 +3,21 @@ use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use console::Term;
 use std::fs::File;
 use std::io::BufWriter;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 
 // some const
 const THREAD_NUM: usize = 4;
-const PREFIX_LEN: usize = 1;
-const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
-// const PREFIX_LEN: usize = 42;
-// const PREFIX_LIST: [usize; PREFIX_LEN] = [134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188, 198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176, 185, 186, 170, 171];
-const MOBILE_SPAN_LEN: usize = 1000000;
+// const PREFIX_LEN: usize = 1;
+// const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
+const PREFIX_LEN: usize = 42;
+const PREFIX_LIST: [usize; PREFIX_LEN] = [
+    134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188,
+    198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176,
+    185, 186, 170, 171,
+];
+const MOBILE_SPAN_LEN: usize = 100000000;
 const TOTAL_NUM: usize = PREFIX_LEN * MOBILE_SPAN_LEN;
 const SLICE_LEN: usize = u16::max_value() as usize + 1;
 const SLICE_NUM: usize = TOTAL_NUM / SLICE_LEN + 1;
@@ -25,25 +29,23 @@ struct Pair {
 }
 
 fn main() {
-    // alloc memory
+    build_formula();
+
     let mut v = alloc_big_vec(TOTAL_NUM);
-
-    build_formula(&mut v);
-    // write_formula_to_file(&v);
-
-    // read_formula_from_file(&mut v);
-    // look_up(&v);
+    read_formula_from_file(&mut v);
+    look_up(&v);
 }
 
-fn build_formula(v: &mut Vec<Pair>) {
+fn build_formula() {
     let start = Instant::now();
     println!("Start to build formula ...");
- 
     let (tx, rx) = mpsc::channel();
 
+    // alloc memory
+    let v_mutex = Arc::new(Mutex::new(alloc_big_vec(TOTAL_NUM)));
     let mut thread_slice_array = [(0, 0); THREAD_NUM]; // each thread's slice (start, length)
     for threadid in 0..THREAD_NUM {
-        println!("");
+        println!("Thread {} starting ...", threadid);
         // assign slices to threads
         let mut thread_slice_num = SLICE_NUM / THREAD_NUM;
         if threadid < SLICE_NUM % THREAD_NUM {
@@ -57,9 +59,9 @@ fn build_formula(v: &mut Vec<Pair>) {
         // println!("{:?}", thread_slice_array[threadid]);
 
         //create threads
-        let c_tx = mpsc::Sender::clone(&tx);
+        let v_clone = v_mutex.clone();
+        let clone_tx = mpsc::Sender::clone(&tx);
         thread::spawn(move || {
-            let term = Term::stdout();
             // alloc local thread memory
             let mut v_thread = alloc_big_vec(SLICE_LEN);
             // work on each slice
@@ -78,45 +80,48 @@ fn build_formula(v: &mut Vec<Pair>) {
                 // sort each slice
                 v_thread.sort_by(|a, b| a.md5.cmp(&b.md5));
 
-                // send to main thread
+                // write to main memory
+                let mut v = v_clone.lock().unwrap();
                 for mobile_index in 0..SLICE_LEN {
                     let address = slice * SLICE_LEN + mobile_index;
-                    c_tx.send((
-                        address,
-                        v_thread[mobile_index].mobile_index,
-                        v_thread[mobile_index].md5,
-                    ))
-                    .unwrap();
+                    if address < TOTAL_NUM {
+                        v[address].md5 = v_thread[mobile_index].md5;
+                        v[address].mobile_index = v_thread[mobile_index].mobile_index;
+                    }
                 }
-                // print progress
-                term.move_cursor_down(THREAD_NUM).unwrap();
-                term.move_cursor_up(THREAD_NUM - threadid).unwrap();
-                term.clear_line().unwrap();
-                term.write_str(&format!("Thread {} slice {}/{} completed.", threadid, thread_slice, thread_slice_array[threadid].1)).unwrap();
+
+                // send to main thread
+                clone_tx.send((threadid, thread_slice)).unwrap();
             }
-            term.move_cursor_down(THREAD_NUM).unwrap();
-            term.move_cursor_up(THREAD_NUM - threadid).unwrap();
-            term.clear_line().unwrap();
-            term.write_str(&format!("Thread {} completed after {:?}.", threadid, start.elapsed())).unwrap();
         });
     }
     drop(tx);
 
     // recieve results from threads
-    for (address, mobile_index, m_md5) in rx {
-        if address < TOTAL_NUM {
-            v[address].md5 = m_md5;
-            v[address].mobile_index = mobile_index;
-        }
+    let term = Term::stdout();
+    for (threadid, thread_slice) in rx {
+        // print progress
+        term.move_cursor_up(THREAD_NUM - threadid).unwrap();
+        term.clear_line().unwrap();
+        term.write_str(&format!(
+            "Thread {} slice {}/{} completed. @{}s",
+            threadid,
+            thread_slice + 1,
+            thread_slice_array[threadid].1,
+            start.elapsed().as_secs()
+        ))
+        .unwrap();
+        term.move_cursor_down(THREAD_NUM - threadid).unwrap();
+        term.clear_line().unwrap();
     }
 
-    let term = Term::stdout();
-    term.move_cursor_down(THREAD_NUM).unwrap();
-    term.clear_line().unwrap();
     println!(
-        "# Main thread formula completed after {:?}",
-        start.elapsed()
+        "# Main thread formula completed after {}s",
+        start.elapsed().as_secs()
     );
+
+    //
+    write_formula_to_file(&v_mutex.clone().lock().unwrap());
 }
 
 fn alloc_big_vec(len: usize) -> Vec<Pair> {
@@ -150,7 +155,7 @@ fn restore_mobile(mobile_index: u16, slice: usize) -> u64 {
 fn look_up(v: &Vec<Pair>) {
     let start = Instant::now();
 
-    let digest = md5::compute("13856124456".to_string());
+    let digest = md5::compute("1473856456".to_string());
     let m_md5 = digest_to_md5(digest);
     for slice in 0..SLICE_NUM {
         // look up in each slice
