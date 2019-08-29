@@ -10,15 +10,26 @@ use std::time::Instant;
 
 // some const
 const THREAD_NUM: usize = 4;
-// const PREFIX_LEN: usize = 1;
-// const PREFIX_LIST: [usize; PREFIX_LEN] = [134];
-const PREFIX_LEN: usize = 42;
+const PREFIX_LEN: usize = 44;
 // the sequnce of the prefixes is optimized by putting the most frequent ones to
 // the front inside each 4 group
+// [('186', 716495), ('158', 710534), ('135', 695733), ('159', 695146),
+//  ('136', 679350), ('150', 664271), ('137', 660530), ('138', 645891), 
+//  ('187', 635777), ('151', 628992), ('182', 617683), ('152', 617580), 
+//  ('139', 616160), ('183', 548983), ('188', 534265), ('134', 410070), 
+//  ('185', 326902), ('189', 304128), ('180', 294937), ('157', 284990), 
+//  ('155', 277126), ('156', 265458), ('131', 261437), ('132', 259597), 
+//  ('133', 255571), ('130', 250038), ('181', 249092), ('176', 242827), 
+//  ('177', 228022), ('153', 215892), ('184', 78492), ('178', 76291), 
+//  ('173', 72096), ('147', 48942), ('175', 38738), ('199', 16200), 
+//  ('166', 14720), ('170', 4409), ('198', 4110), ('171', 1438), 
+//  ('191', 145), ('145', 40), ('165', 2), ('172', 1), 
+//  ('154', 1), ('146', 1)]
 const PREFIX_LIST: [usize; PREFIX_LEN] = [
-    134, 135, 136, 137, 138, 139, 147, 150, 151, 152, 157, 158, 159, 178, 182, 183, 184, 187, 188,
-    198, 133, 149, 153, 173, 177, 180, 181, 189, 199, 130, 131, 132, 145, 155, 156, 166, 175, 176,
-    185, 186, 170, 171,
+    186, 136, 187, 139, 185, 155, 133, 177, 173, 166, 191,
+    158, 150, 151, 183, 189, 156, 130, 153, 147, 170, 145,
+    135, 137, 182, 188, 180, 131, 181, 184, 175, 198, 165,
+    159, 138, 152, 134, 157, 132, 176, 178, 199, 171, 172
 ];
 const MOBILE_SPAN_LEN: usize = 100000000;
 const TOTAL_NUM: usize = PREFIX_LEN * MOBILE_SPAN_LEN;
@@ -57,7 +68,7 @@ fn main() {
                 if args.len() < 3 {
                     println!("please add a filename!")
                 } else {
-                    // build_formula(&v_mutex);
+                    build_formula(&v_mutex);
                     decode_file(&v_mutex, &args[2]);
                 }
             }
@@ -360,8 +371,8 @@ fn decode_file(v_mutex: &Arc<Mutex<Vec<Pair>>>, filename: &String) {
                 term.write_str(&format!("Decoding ...{}/{}", i+1, len)).unwrap();
             }
 
-            println!("Decode completed. Please find the results in {}.out", filename);
-            println!("\n# Decode file costed {:?}", start.elapsed());
+            println!("\nDecode completed. Please find the results in {}.out", filename);
+            println!("# Decode file costed {:?}", start.elapsed());
         },
     }
 }
