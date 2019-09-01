@@ -1,193 +1,222 @@
-use buffered_reader;
-use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
 use console::Term;
 use std::env;
 use std::fs::File;
-use std::io::{Write, BufWriter};
-use std::sync::{mpsc, Arc, Mutex};
+use std::io::Write;
 use std::thread;
 use std::time::Instant;
+use std::sync::{mpsc, Arc, Mutex};
 
-// some const
-const THREAD_NUM: usize = 4;
-const PREFIX_LEN: usize = 44;
-// the sequnce of the prefixes is optimized by putting the most frequent ones to
-// the front inside each 4 group
+// the sequnce of the prefixes is optimized by putting the most frequent ones to the front
 // [('186', 716495), ('158', 710534), ('135', 695733), ('159', 695146),
-//  ('136', 679350), ('150', 664271), ('137', 660530), ('138', 645891), 
-//  ('187', 635777), ('151', 628992), ('182', 617683), ('152', 617580), 
-//  ('139', 616160), ('183', 548983), ('188', 534265), ('134', 410070), 
-//  ('185', 326902), ('189', 304128), ('180', 294937), ('157', 284990), 
-//  ('155', 277126), ('156', 265458), ('131', 261437), ('132', 259597), 
-//  ('133', 255571), ('130', 250038), ('181', 249092), ('176', 242827), 
-//  ('177', 228022), ('153', 215892), ('184', 78492), ('178', 76291), 
-//  ('173', 72096), ('147', 48942), ('175', 38738), ('199', 16200), 
-//  ('166', 14720), ('170', 4409), ('198', 4110), ('171', 1438), 
-//  ('191', 145), ('145', 40), ('165', 2), ('172', 1), 
+//  ('136', 679350), ('150', 664271), ('137', 660530), ('138', 645891),
+//  ('187', 635777), ('151', 628992), ('182', 617683), ('152', 617580),
+//  ('139', 616160), ('183', 548983), ('188', 534265), ('134', 410070),
+//  ('185', 326902), ('189', 304128), ('180', 294937), ('157', 284990),
+//  ('155', 277126), ('156', 265458), ('131', 261437), ('132', 259597),
+//  ('133', 255571), ('130', 250038), ('181', 249092), ('176', 242827),
+//  ('177', 228022), ('153', 215892), ('184', 78492), ('178', 76291),
+//  ('173', 72096), ('147', 48942), ('175', 38738), ('199', 16200),
+//  ('166', 14720), ('170', 4409), ('198', 4110), ('171', 1438),
+//  ('191', 145), ('145', 40), ('165', 2), ('172', 1),
 //  ('154', 1), ('146', 1)]
-const PREFIX_LIST: [usize; PREFIX_LEN] = [
-    186, 136, 187, 139, 185, 155, 133, 177, 173, 166, 191,
-    158, 150, 151, 183, 189, 156, 130, 153, 147, 170, 145,
-    135, 137, 182, 188, 180, 131, 181, 184, 175, 198, 165,
-    159, 138, 152, 134, 157, 132, 176, 178, 199, 171, 172
+const PREFIX_LIST: [usize; 46] = [
+186, 134, 135, 159,
+136, 150, 137, 138,
+187, 151, 182, 152,
+139, 183, 188, 134,
+185, 189, 180, 157,
+155, 156, 131, 132,
+133, 130, 181, 176,
+177, 153, 184, 178,
+173, 147, 175, 199,
+166, 170, 198, 171,
+191, 145, 165, 172, 
+154, 146
 ];
 const MOBILE_SPAN_LEN: usize = 100000000;
-const TOTAL_NUM: usize = PREFIX_LEN * MOBILE_SPAN_LEN;
-const SLICE_LEN: usize = u16::max_value() as usize + 1;
-const SLICE_NUM: usize = TOTAL_NUM / SLICE_LEN + 1;
+const HS_BITS: usize = 5;
+const MB_BITS: usize = 4;
 
 // the data structure of the formula
 struct Pair {
-    md5: u16,          // the first 16 digits of the md5 digest
-    mobile_index: u16, // the index in each slice
+    hash: [u8; HS_BITS],
+    mobile_index: [u8; MB_BITS],
 }
 
 fn main() {
-    // alloc memory
-    let v_mutex = Arc::new(Mutex::new(alloc_big_vec(TOTAL_NUM)));
-
-    // parse commands
+    // parse file name
+    let filename: String;
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
-        print_usage();
+        println!("missing file name");
+        return;
     } else {
-        match args[1].as_str() {
-            "-b" => {
-                build_formula(&v_mutex);
-                write_formula_to_file(&v_mutex);
-            }
-            "-t" => {
-                build_formula(&v_mutex);
-                test(&v_mutex);
-            }
-            "-tf" => {
-                read_formula_from_file(&v_mutex);
-                test(&v_mutex);
-            }
-            "-d" => {
-                if args.len() < 3 {
-                    println!("please add a filename!")
-                } else {
-                    build_formula(&v_mutex);
-                    decode_file(&v_mutex, &args[2]);
+        filename = args[1].to_string();
+    }
+
+    // process the file and get a md5 hash list
+    print!("Loading file {}... ", filename);
+    let mut v_hash: Vec<(String, usize)> = vec![];
+    match std::fs::read_to_string(&filename) {
+        Err(_) => {
+            println!("couldn't open {}", filename);
+        }
+        Ok(buf) => {
+            let v: Vec<&str> = buf.split(',').collect();
+            for s in v {
+                let s = s.trim();
+                if s.len() > 0 {
+                    v_hash.push((s.to_string(),0));
                 }
             }
-            "-df" => {
-                if args.len() < 3 {
-                    println!("please add a filename!")
-                } else {
-                    read_formula_from_file(&v_mutex);
-                    decode_file(&v_mutex, &args[2]);
-                }
-            }
-            _ => print_usage(),
         }
     }
-}
-
-fn print_usage() {
-    println!("md5mobile 0.1.0");
-    println!("Herman Wu");
-    println!("");
-    println!("md5mobile builds a formula in memory to decode md5 hash value back to the original mobile number. It supports Chinese mobile number in the format of 13812345678.");
-    println!("");
-    println!("Usage:");
-    println!("  md5mobile [Flags] [Filename]");
-    println!("Flags:");
-    println!("  -d    decode the hashes in given file.");
-    println!("  -t    generate random mobiles and test");
-    println!("  -b    build formula and write to file \"formula.dat\"");
-    println!("  -f    load from \"formula.dat\" at first. usage: -df, -tf");
-    println!("Filename:");
-    println!("  csv file which contains hashes to be decoded.");
-}
-
-fn build_thread_slice_array() -> [(usize, usize); THREAD_NUM] {
-    let mut thread_slice_array = [(0, 0); THREAD_NUM]; // each thread's slice (start, length)
-    for threadid in 0..THREAD_NUM {
-        // assign slices to threads
-        let mut thread_slice_num = SLICE_NUM / THREAD_NUM;
-        if threadid < SLICE_NUM % THREAD_NUM {
-            thread_slice_num += 1;
-        }
-        let mut slice_start = 0;
-        if threadid > 0 {
-            slice_start = thread_slice_array[threadid - 1].0 + thread_slice_array[threadid - 1].1;
-        }
-        thread_slice_array[threadid] = (slice_start, thread_slice_num);
+    let v_hash_len = v_hash.len();
+    if v_hash_len == 0 {
+        println!("no valid hash");
+        return; 
     }
-    thread_slice_array
-}
+    println!("OK");
+    println!("Total {} hashes.", v_hash_len);
 
-fn build_formula(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
+    println!("Start to decode...");
     let start = Instant::now();
-    println!("Start to build formula ...");
+    let thread_num = num_cpus::get();
+
+    // alloc memory
+    let slice_len = MOBILE_SPAN_LEN / thread_num;
+    let v_hash_mutex = Arc::new(Mutex::new(v_hash));
+    let finished: usize = 0;
+    let finished_mutex = Arc::new(Mutex::new(finished));
+
+    //create threads
     let (tx, rx) = mpsc::channel();
-
-    let thread_slice_array = build_thread_slice_array();
-    for threadid in 0..THREAD_NUM {
-        println!("Thread {} starting ...", threadid);
-        //create threads
-        let v_clone = v_mutex.clone();
+    for threadid in 0..thread_num {
+        println!("Thread {} starting...", threadid);
         let tx_clone = mpsc::Sender::clone(&tx);
+        let v_hash_clone = v_hash_mutex.clone();
+        let finished_clone = finished_mutex.clone();
         thread::spawn(move || {
-            // alloc local thread memory
-            let mut v_thread = alloc_big_vec(SLICE_LEN);
-            // work on each slice
-            for thread_slice in 0..thread_slice_array[threadid].1 {
-                let slice = thread_slice_array[threadid].0 + thread_slice;
-                // cumpute md5 hash
-                for mobile_index in 0..SLICE_LEN {
-                    let address = slice * SLICE_LEN + mobile_index;
-                    if address < TOTAL_NUM {
-                        let mobile = address_to_mobile(address);
-                        let m_md5 = mobile_to_md5(mobile);
-                        v_thread[mobile_index].md5 = m_md5;
-                        v_thread[mobile_index].mobile_index = mobile_index as u16;
-                    }
-                }
-                // sort each slice
-                v_thread.sort_by(|a, b| a.md5.cmp(&b.md5));
-
-                // write to main memory
-                let mut v = v_clone.lock().unwrap();
-                for mobile_index in 0..SLICE_LEN {
-                    let address = slice * SLICE_LEN + mobile_index;
-                    if address < TOTAL_NUM {
-                        v[address].md5 = v_thread[mobile_index].md5;
-                        v[address].mobile_index = v_thread[mobile_index].mobile_index;
-                    }
-                }
-
-                // send progress to main thread
-                tx_clone.send((threadid, thread_slice)).unwrap();
+            if threadid > 0 {
+                // allow some interval to avoid conflict in accessing mutex
+                thread::sleep(std::time::Duration::from_millis(200*threadid as u64));
             }
+            let mut v = alloc_big_vec(slice_len);
+            let mut is_finished = false;
+            for prefix in 0..PREFIX_LIST.len() {
+                // comput md5
+                let mut percent = 0;
+                for i in 0..slice_len {
+                    let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + threadid*slice_len + i;
+                    let hash = md5::compute(mobile.to_string());
+                    for j in 0..HS_BITS {v[i].hash[j] = hash[j]}
+                    for j in 0..MB_BITS {v[i].mobile_index[j] = ((i >> (j*8)) % 256) as u8}
+                    let done = (i + 1) * 100 / slice_len;
+                    if done > percent {
+                        percent = done;
+                        tx_clone.send((threadid, prefix, percent, 0)).unwrap();
+                        is_finished = *finished_clone.lock().unwrap() == v_hash_len;
+                        if is_finished {break;}
+                    }
+                }
+                if is_finished {break;}
+                // sort
+                v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
+                // look up
+                for i in 0..v_hash_len {
+                    let mut hash: [u8; HS_BITS] = [0; HS_BITS];
+                    {
+                        // check if already decoded
+                        let v_hash = v_hash_clone.lock().unwrap();
+                        let finished = finished_clone.lock().unwrap();
+                        if *finished == v_hash_len {break;}
+                        if v_hash[i].1 != 0 { continue;}
+
+                        // still some hash not decoded
+                        let hash_bytes = hex::decode(&v_hash[i].0).unwrap();
+                        for j in 0..HS_BITS {
+                            hash[j] = hash_bytes[j];
+                        }
+                    }
+
+                    let result = v.binary_search_by(|probe| probe.hash.cmp(&hash));
+                    match result {
+                        Ok(index) => {
+                            // verify and find the corect match
+                            let mut i_result = index;
+                            while v[i_result].hash == hash {
+                                let mut mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + threadid*slice_len;
+                                for k in 0..MB_BITS {
+                                    mobile += (v[i_result].mobile_index[k] as usize) << k*8;
+                                }
+                                
+                                let hash_i = md5::compute(mobile.to_string());
+                                let mut v_hash = v_hash_clone.lock().unwrap();
+                                if format!("{:?}", hash_i) == v_hash[i].0 {
+                                    let mut finished = finished_clone.lock().unwrap();
+                                    v_hash[i].1 = mobile;
+                                    *finished += 1;
+                                    tx_clone.send((threadid, prefix, 101, *finished)).unwrap();
+                                    break;
+                                }
+                                if i_result > 0 {
+                                    i_result -= 1;
+                                } else {
+                                    break;
+                                }                                
+                            }
+                        }
+                        Err(_) => {
+                            // println!("{},{}",hash,0);
+                        }
+                    }
+                }
+                if *finished_clone.lock().unwrap() == v_hash_len {break;} // don't have to look into other prefixes
+            }            
         });
     }
     drop(tx);
 
     // recieve progress from threads
     let term = Term::stdout();
-    for (threadid, thread_slice) in rx {
+    let mut hash_finished = 0;
+    for (threadid, prefix, percent, finished) in rx {
         // print progress
-        term.move_cursor_up(THREAD_NUM - threadid).unwrap();
-        term.clear_line().unwrap();
-        term.write_str(&format!(
-            "Thread {} slice {}/{} completed. @{:?}",
+        let mut thread_str = format!(
+            "{}: Thread {} building formula... {}% completed. @{:?}",
+            PREFIX_LIST[prefix],
             threadid,
-            thread_slice + 1,
-            thread_slice_array[threadid].1,
+            percent,
             start.elapsed()
-        ))
-        .unwrap();
-        term.move_cursor_down(THREAD_NUM - threadid).unwrap();
+        );
+        if percent >= 100 {
+            thread_str = format!("{}: Thread {} looking up...", PREFIX_LIST[prefix], threadid);
+            if percent > 100 { hash_finished = finished; }
+        }
+        term.move_cursor_up(thread_num - threadid).unwrap();
         term.clear_line().unwrap();
+        term.write_str(&thread_str).unwrap();
+        term.move_cursor_down(thread_num - threadid).unwrap();
+        term.clear_line().unwrap();
+        term.write_str(&format!("{}/{} decoded", hash_finished, v_hash_len)).unwrap();
+    }
+    for i in 0..thread_num {
+        term.move_cursor_up(thread_num - i).unwrap();
+        term.clear_line().unwrap();
+        term.write_str(&format!("Thread {} stoped", i)).unwrap();
+        term.move_cursor_down(thread_num - i).unwrap();
+    }
+    println!("\nCompleted @{:?}", start.elapsed());
+
+    // write result to file
+    let mut file = File::create(format!("{}.out",filename)).unwrap();
+    let v_hash_clone = v_hash_mutex.clone();
+    let v_hash = v_hash_clone.lock().unwrap();
+    for i in 0..v_hash_len {
+        file.write(format!("{},{}\n", v_hash[i].0, v_hash[i].1).as_ref()).unwrap();
     }
 
-    println!(
-        "# Main thread formula completed after {:?}",
-        start.elapsed()
-    );
+    println!("Decoded results are in {}.out", filename);
 }
 
 fn alloc_big_vec(len: usize) -> Vec<Pair> {
@@ -196,204 +225,4 @@ fn alloc_big_vec(len: usize) -> Vec<Pair> {
         v.set_len(len);
     }
     v
-}
-
-fn address_to_mobile(address: usize) -> u64 {
-    (PREFIX_LIST[address / MOBILE_SPAN_LEN] * MOBILE_SPAN_LEN + address % MOBILE_SPAN_LEN) as u64
-}
-
-fn mobile_to_md5(mobile: u64) -> u16 {
-    let digest = md5::compute(mobile.to_string());
-    digest_to_md5(digest)
-}
-
-fn digest_to_md5(digest: md5::Digest) -> u16 {
-    let d0 = digest[0] as u16;
-    let d1 = digest[1] as u16;
-    (d0 << 8) + d1
-}
-
-fn restore_mobile(mobile_index: u16, slice: usize) -> u64 {
-    let address = slice * SLICE_LEN + mobile_index as usize;
-    address_to_mobile(address)
-}
-
-fn look_up(v_mutex: &Arc<Mutex<Vec<Pair>>>, digest_str: &str) -> u64 {
-    let mut digest = md5::Digest::from(md5::Context::new());
-    let str_decoded = hex::decode(digest_str).unwrap();
-    for i in 0..digest.len() {
-        digest[i] = str_decoded[i];
-    }
-    look_up_digest(&v_mutex, digest)
-}
-
-fn look_up_digest(v_mutex: &Arc<Mutex<Vec<Pair>>>, digest: md5::Digest) -> u64 {
-    // let start = Instant::now();
-    
-    let m_md5 = digest_to_md5(digest);
-    let found = Arc::new(Mutex::new(false));
-
-    let (tx, rx) = mpsc::channel();
-    let thread_slice_array = build_thread_slice_array();
-    for threadid in 0..THREAD_NUM {
-        //create threads
-        let v_clone = v_mutex.clone();
-        let tx_clone = mpsc::Sender::clone(&tx);
-        let found = found.clone();
-        thread::spawn(move || {
-            // work on each slice
-            for thread_slice in 0..thread_slice_array[threadid].1 {
-                let slice = thread_slice_array[threadid].0 + thread_slice;
-                let slice_start = slice * SLICE_LEN;
-                let mut slice_end = slice_start + SLICE_LEN;
-                if slice_end > TOTAL_NUM {
-                    slice_end = TOTAL_NUM;
-                }
-                let v = v_clone.lock().unwrap();
-                let v_slice = &v[slice_start..slice_end];
-                let result = v_slice.binary_search_by(|probe| probe.md5.cmp(&m_md5));
-                match result {
-                    Ok(index) => {
-                        let mut i = index;
-                        while i > 0 && v_slice[i].md5 == m_md5 {
-                            let mobile_index = v_slice[i].mobile_index;
-                            let mobile = restore_mobile(mobile_index, slice);
-                            // println!("{},{},{}", threadid, slice, mobile);
-                            
-                            if md5::compute(mobile.to_string()) == digest {
-                                let mut found = found.lock().unwrap();
-                                *found = true;
-                                // println!("## {}", mobile);
-                                // send result to main thread
-                                tx_clone.send((true, mobile)).unwrap();
-                                break;
-                            }
-                            i -= 1;
-                        }
-                    }
-                    Err(_) => {
-                        // println!("{} not found", slice);
-                    }
-                }
-                // check if found by other threads
-                let found = found.lock().unwrap();
-                if *found {
-                    break;
-                }
-            }
-        });
-    }
-    drop(tx);
-
-    // recieve results from threads
-    for (found, mobile) in rx {
-        if found {
-            // println!("found {}", mobile);
-            // println!("Look up costed {:?}", start.elapsed());
-            return mobile;
-        }
-    }
-
-    // println!("Look up costed {:?}", start.elapsed());
-    return 0;
-}
-
-fn write_formula_to_file(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
-    let start = Instant::now();
-    let v_clone = v_mutex.clone();
-    let v = v_clone.lock().unwrap();
-    let term = Term::stdout();
-    let mut percent = 0;
-    term.write_str(&format!("Writing formula to file ...{}%", percent))
-        .unwrap();
-
-    // write md5 then mobile brings better compress ratio
-    // however it increases memory access costs
-    let mut file = BufWriter::new(File::create("formula.dat").unwrap());
-    for i in 0..TOTAL_NUM {
-        file.write_u16::<NativeEndian>(v[i].md5).unwrap();
-        file.write_u16::<NativeEndian>(v[i].mobile_index).unwrap();
-        let done = (i + 1) * 100 / TOTAL_NUM;
-        if done > percent {
-            percent = done;
-            term.clear_line().unwrap();
-            term.write_str(&format!("Writing formula to file ...{}%", percent))
-                .unwrap();
-        }
-    }
-    println!("\n# Write formula costed {:?}", start.elapsed());
-}
-
-fn read_formula_from_file(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
-    let start = Instant::now();
-    let v_clone = v_mutex.clone();
-    let mut v = v_clone.lock().unwrap();
-    let term = Term::stdout();
-    let mut percent = 0;
-    term.write_str(&format!("Reading formula from file ...{}%", percent))
-        .unwrap();
-
-    let mut file = buffered_reader::File::open("formula.dat").unwrap();
-    for i in 0..TOTAL_NUM {
-        v[i].md5 = file.read_u16::<NativeEndian>().unwrap();
-        v[i].mobile_index = file.read_u16::<NativeEndian>().unwrap();
-        let done = (i + 1) * 100 / TOTAL_NUM;
-        if done > percent {
-            percent = done;
-            term.clear_line().unwrap();
-            term.write_str(&format!("Reading formula from file ...{}%", percent))
-                .unwrap();
-        }
-    }
-    println!("\n# Read formula costed {:?}", start.elapsed());
-}
-
-fn decode_file(v_mutex: &Arc<Mutex<Vec<Pair>>>, filename: &String) {
-    match std::fs::read_to_string(filename) {
-        Err(_) => {println!("couldn't open {}", filename); return;},
-        Ok(buf) => {
-            let start = Instant::now();
-
-            let v: Vec<&str> = buf.split(',').collect();
-            let mut v_hash: Vec<&str> = vec![];
-            for s in v {
-                let s = s.trim();
-                if s.len() > 0 { v_hash.push(s); }
-            }
-
-            let mut file = File::create(format!("{}.out",filename)).unwrap();
-            let term = Term::stdout();
-            let len = v_hash.len();
-            for i in 0..len {
-                let mobile = look_up(v_mutex, v_hash[i]);
-                file.write(format!("{},{}\n", v_hash[i], mobile).as_ref()).unwrap();
-                term.clear_line().unwrap();
-                term.write_str(&format!("Decoding ...{}/{}", i+1, len)).unwrap();
-            }
-
-            println!("\nDecode completed. Please find the results in {}.out", filename);
-            println!("# Decode file costed {:?}", start.elapsed());
-        },
-    }
-}
-
-fn test(v_mutex: &Arc<Mutex<Vec<Pair>>>) {
-    println!("run test ...");
-    let n = 10;
-    use rand::{thread_rng, Rng};
-    let mut rng = thread_rng();
-    let start = Instant::now();
-
-    for _ in 0..n {
-        let start = Instant::now();
-        let prefix = rng.gen_range(0, PREFIX_LEN);
-        let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + rng.gen_range(0, MOBILE_SPAN_LEN);
-        let digest = format!("{:?}", md5::compute(mobile.to_string()));
-        let result = look_up(&v_mutex, &digest);
-        println!("{},{},{},{:?}", mobile, digest, result, start.elapsed());
-    }
-
-    let costs = start.elapsed().as_millis() / n;
-    let costs = costs as f32 / 1000.;
-    println!("average costs {}s", costs);
 }
