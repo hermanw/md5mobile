@@ -20,7 +20,7 @@ use std::sync::{mpsc, Arc, Mutex};
 //  ('191', 145), ('145', 40), ('165', 2), ('172', 1),
 //  ('154', 1), ('146', 1)]
 const PREFIX_LIST: [usize; 46] = [
-186, 134, 135, 159,
+186, 158, 135, 159,
 136, 150, 137, 138,
 187, 151, 182, 152,
 139, 183, 188, 134,
@@ -34,13 +34,12 @@ const PREFIX_LIST: [usize; 46] = [
 154, 146
 ];
 const MOBILE_SPAN_LEN: usize = 100000000;
-const HS_BITS: usize = 5;
-const MB_BITS: usize = 4;
+const SLICE_NUM: usize = 10;    // each thread divides its span into slices
 
 // the data structure of the formula
 struct Pair {
-    hash: [u8; HS_BITS],
-    mobile_index: [u8; MB_BITS],
+    hash: u32,
+    mobile_index: u32,
 }
 
 fn main() {
@@ -83,11 +82,11 @@ fn main() {
     let start = Instant::now();
     let thread_num = num_cpus::get();
 
-    // alloc memory
-    let slice_len = MOBILE_SPAN_LEN / thread_num;
+    // set up mutex
     let v_hash_mutex = Arc::new(Mutex::new(v_hash));
     let finished: usize = 0;
     let finished_mutex = Arc::new(Mutex::new(finished));
+    let slice_len = MOBILE_SPAN_LEN / thread_num / SLICE_NUM;
 
     //create threads
     let (tx, rx) = mpsc::channel();
@@ -101,78 +100,80 @@ fn main() {
                 // allow some interval to avoid conflict in accessing mutex
                 thread::sleep(std::time::Duration::from_millis(200*threadid as u64));
             }
+            // alloc memory
             let mut v = alloc_big_vec(slice_len);
-            let mut is_finished = false;
+            // start to work on each prefix
             for prefix in 0..PREFIX_LIST.len() {
-                // comput md5
-                let mut percent = 0;
-                for i in 0..slice_len {
-                    let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + threadid*slice_len + i;
-                    let hash = md5::compute(mobile.to_string());
-                    for j in 0..HS_BITS {v[i].hash[j] = hash[j]}
-                    for j in 0..MB_BITS {v[i].mobile_index[j] = ((i >> (j*8)) % 256) as u8}
-                    let done = (i + 1) * 100 / slice_len;
-                    if done > percent {
-                        percent = done;
-                        tx_clone.send((threadid, prefix, percent, 0)).unwrap();
-                        is_finished = *finished_clone.lock().unwrap() == v_hash_len;
-                        if is_finished {break;}
-                    }
-                }
-                if is_finished {break;}
-                // sort
-                v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
-                // look up
-                for i in 0..v_hash_len {
-                    let mut hash: [u8; HS_BITS] = [0; HS_BITS];
-                    {
-                        // check if already decoded
-                        let v_hash = v_hash_clone.lock().unwrap();
-                        let finished = finished_clone.lock().unwrap();
-                        if *finished == v_hash_len {break;}
-                        if v_hash[i].1 != 0 { continue;}
-
-                        // still some hash not decoded
-                        let hash_bytes = hex::decode(&v_hash[i].0).unwrap();
-                        for j in 0..HS_BITS {
-                            hash[j] = hash_bytes[j];
+                // work on each slice
+                for slice in 0..SLICE_NUM {
+                    // step 1: compute md5
+                    for i in 0..slice_len {
+                        let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN
+                            + (threadid * SLICE_NUM + slice) * slice_len
+                            + i;
+                        let hash = md5::compute(mobile.to_string());
+                        unsafe {
+                            v[i].hash = *(hash.as_ptr() as *const u32);
                         }
+                        v[i].mobile_index = i as u32;
                     }
+                    // step 2: sort
+                    v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
+                    // step 3: look up all hashes
+                    for i in 0..v_hash_len {
+                        #[allow(unused_assignments)]
+                        let mut hash: u32 = 0;
+                        {
+                            // check if already decoded
+                            let v_hash = v_hash_clone.lock().unwrap();
+                            let finished = finished_clone.lock().unwrap();
+                            if *finished == v_hash_len {break;}
+                            if v_hash[i].1 != 0 { continue;}
 
-                    let result = v.binary_search_by(|probe| probe.hash.cmp(&hash));
-                    match result {
-                        Ok(index) => {
-                            // verify and find the corect match
-                            let mut i_result = index;
-                            while v[i_result].hash == hash {
-                                let mut mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + threadid*slice_len;
-                                for k in 0..MB_BITS {
-                                    mobile += (v[i_result].mobile_index[k] as usize) << k*8;
-                                }
-                                
-                                let hash_i = md5::compute(mobile.to_string());
-                                let mut v_hash = v_hash_clone.lock().unwrap();
-                                if format!("{:?}", hash_i) == v_hash[i].0 {
-                                    let mut finished = finished_clone.lock().unwrap();
-                                    v_hash[i].1 = mobile;
-                                    *finished += 1;
-                                    tx_clone.send((threadid, prefix, 101, *finished)).unwrap();
-                                    break;
-                                }
-                                if i_result > 0 {
-                                    i_result -= 1;
-                                } else {
-                                    break;
-                                }                                
+                            // still some hash not decoded
+                            let hash_bytes = hex::decode(&v_hash[i].0).unwrap();
+                            unsafe {
+                                hash = *(hash_bytes.as_ptr() as *const u32);
                             }
                         }
-                        Err(_) => {
-                            // println!("{},{}",hash,0);
+
+                        let result = v.binary_search_by(|probe| probe.hash.cmp(&hash));
+                        match result {
+                            Ok(index) => {
+                                // verify and find the corect match
+                                let mut i_result = index;
+                                while v[i_result].hash == hash {
+                                    let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN
+                                        + (threadid * SLICE_NUM + slice) * slice_len
+                                        + v[i_result].mobile_index as usize;
+                                    
+                                    let hash_i = md5::compute(mobile.to_string());
+                                    let mut v_hash = v_hash_clone.lock().unwrap();
+                                    if format!("{:?}", hash_i) == v_hash[i].0 {
+                                        let mut finished = finished_clone.lock().unwrap();
+                                        v_hash[i].1 = mobile;
+                                        *finished += 1;
+                                        tx_clone.send((threadid, prefix, slice, *finished)).unwrap();
+                                        break;
+                                    }
+                                    if i_result > 0 {
+                                        i_result -= 1;
+                                    } else {
+                                        break;
+                                    }                                
+                                }
+                            }
+                            Err(_) => {
+                                // println!("{},{}",hash,0);
+                            }
                         }
                     }
-                }
-                if *finished_clone.lock().unwrap() == v_hash_len {break;} // don't have to look into other prefixes
-            }            
+                    // send progress
+                    tx_clone.send((threadid, prefix, slice, 0)).unwrap();
+                    if *finished_clone.lock().unwrap() == v_hash_len {break;} // check if work done
+                } 
+                if *finished_clone.lock().unwrap() == v_hash_len {break;} // check if work done
+            }
         });
     }
     drop(tx);
@@ -180,25 +181,21 @@ fn main() {
     // recieve progress from threads
     let term = Term::stdout();
     let mut hash_finished = 0;
-    for (threadid, prefix, percent, finished) in rx {
+    for (threadid, prefix, slice, finished) in rx {
         // print progress
-        let mut thread_str = format!(
-            "{}: Thread {} building formula... {}% completed. @{:?}",
+        let thread_str = format!(
+            "{}: Thread {} working... {}% completed.",
             PREFIX_LIST[prefix],
             threadid,
-            percent,
-            start.elapsed()
+            (slice+1)*100/SLICE_NUM
         );
-        if percent >= 100 {
-            thread_str = format!("{}: Thread {} looking up...", PREFIX_LIST[prefix], threadid);
-            if percent > 100 { hash_finished = finished; }
-        }
+        if finished > 0 {hash_finished = finished;}
         term.move_cursor_up(thread_num - threadid).unwrap();
         term.clear_line().unwrap();
         term.write_str(&thread_str).unwrap();
         term.move_cursor_down(thread_num - threadid).unwrap();
         term.clear_line().unwrap();
-        term.write_str(&format!("{}/{} decoded", hash_finished, v_hash_len)).unwrap();
+        term.write_str(&format!("{}/{} decoded @{:?}", hash_finished, v_hash_len, start.elapsed())).unwrap();
     }
     for i in 0..thread_num {
         term.move_cursor_up(thread_num - i).unwrap();
