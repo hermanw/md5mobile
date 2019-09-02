@@ -184,7 +184,7 @@ fn main() {
     for (threadid, prefix, slice, finished) in rx {
         // print progress
         let thread_str = format!(
-            "{}: Thread {} working... {}% completed.",
+            "{}: Thread {} working... {}%",
             PREFIX_LIST[prefix],
             threadid,
             (slice+1)*100/SLICE_NUM
