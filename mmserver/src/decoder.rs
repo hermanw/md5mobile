@@ -42,6 +42,13 @@ pub struct Decoder {
 
 impl Decoder {    
     pub fn look_up(&mut self, digest_str: &String) -> u64{
+        // validate digest_str
+        match hex::decode(digest_str) {
+            Ok(digest) => if digest.len() != 16 {return 0},
+            Err(_) => return 0,
+        }
+
+        let start = Instant::now();
         // send request
         for sender in &self.q_sender {
             let q = (self.seq, digest_str.to_string());
@@ -69,32 +76,34 @@ impl Decoder {
             let q = (self.seq, digest_str.to_string());
             sender.send(q).unwrap();
         }
+        println!("{},{},{} costed {:?}", self.seq, digest_str, result, start.elapsed());
         // increase seq
         self.seq += 1;
         result
     }
 
-    pub fn test(&mut self) {
-        println!("run test ...");
-        use rand::{thread_rng, Rng};
-        let mut rng = thread_rng();
-        let start = Instant::now();
+    // pub fn test(&mut self) {
+    //     println!("run test ...");
+    //     use rand::{thread_rng, Rng};
+    //     let mut rng = thread_rng();
+    //     let start = Instant::now();
     
-        for prefix in 0..PREFIX_LEN {
-            let start = Instant::now();
-            let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + rng.gen_range(0, MOBILE_SPAN_LEN);
-            let digest = format!("{:?}", md5::compute(mobile.to_string()));
-            let result = self.look_up(&digest);
-            println!("{},{},{},{:?}", mobile, digest, result, start.elapsed());
-        }
+    //     for prefix in 0..PREFIX_LEN {
+    //         let start = Instant::now();
+    //         let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + rng.gen_range(0, MOBILE_SPAN_LEN);
+    //         let digest = format!("{:?}", md5::compute(mobile.to_string()));
+    //         let result = self.look_up(&digest);
+    //         println!("{},{},{},{:?}", mobile, digest, result, start.elapsed());
+    //     }
     
-        let costs = start.elapsed().as_millis() as usize / PREFIX_LEN;
-        let costs = costs as f32 / 1000.;
-        println!("average costs {}s", costs);
-    }
+    //     let costs = start.elapsed().as_millis() as usize / PREFIX_LEN;
+    //     let costs = costs as f32 / 1000.;
+    //     println!("average costs {}s", costs);
+    // }
 }
 
 pub fn init() -> Decoder {
+    println!("Initializing decoder ...");
     let thread_num = num_cpus::get();
     let (a_sender, a_receiver) = mpsc::channel();
     let mut decoder = Decoder {
@@ -124,7 +133,7 @@ pub fn init() -> Decoder {
             // start to listen ...
             loop {
                 let (seq, digest_str) = q_receiver.recv().unwrap();
-                println!("{},{},{}", threadid, seq, digest_str);
+                // println!("{},{},{}", threadid, seq, digest_str);
 
                 let mut digest = md5::Digest::from(md5::Context::new());
                 let str_decoded = hex::decode(digest_str).unwrap();
@@ -138,7 +147,7 @@ pub fn init() -> Decoder {
                     let mobile = look_up_in_slice(&v, threadid, thread_num, slice, digest, m_md5);
                     if mobile > 0 {
                         found = true;
-                        println!("{},{},{} found", threadid, seq, mobile);
+                        // println!("{},{},{} found", threadid, seq, mobile);
                         a_sender_clone.send((seq,mobile)).unwrap();
                         break;
                     }
@@ -151,7 +160,7 @@ pub fn init() -> Decoder {
                 // wait for complete notification
                 if !skip {
                     if !found {
-                        println!("{},{} not found", threadid, seq);
+                        // println!("{},{} not found", threadid, seq);
                         a_sender_clone.send((seq,0)).unwrap();
                     }
                     while q_receiver.try_recv().is_err() {}
@@ -164,6 +173,7 @@ pub fn init() -> Decoder {
     for _ in 0..thread_num {
         decoder.a_receiver.recv().unwrap();
     }
+    println!("Decoder init completed");
     decoder
 }
 
@@ -189,7 +199,7 @@ fn load_formula(v: &mut Vec<Pair>, threadid: usize, thread_num: usize, thread_sl
 fn build_formula(v: &mut Vec<Pair>, threadid: usize, thread_num: usize, thread_slice_num: usize) {
     let start = Instant::now();
     for slice in 0..thread_slice_num {
-        if slice % 100 == 0 {println!("{},{}",threadid,slice);}
+        // if slice % 100 == 0 {println!("{},{}",threadid,slice);}
         // cumpute md5 hash in each slice
         for mobile_index in 0..SLICE_LEN {
             let address = (slice * thread_num + threadid) * SLICE_LEN + mobile_index;
