@@ -1,0 +1,105 @@
+<!doctype html>
+
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Mobile Number MD5 decoder</title>
+</head>
+
+<body>
+  <h2>Mobile Number MD5 decoder</h2>
+  <div>paste md5 hashes here:(comma separated)</div>
+  <textarea id='input' cols="80" rows="8"></textarea>
+  <br><button onclick="decode()">decode</button><span> with <input id="thread_num"></input> threads</span>
+  <br><label id='progress' hidden='true'></label>
+  <br><textarea id='output' hidden='true' readonly='true' cols="80" rows="8"></textarea>
+  <script src="wasm.js"></script>
+  <script>
+    var thread_num = window.navigator.hardwareConcurrency;
+    document.getElementById("thread_num").value = thread_num;
+    var workers = [];
+    var results = [];
+    var hash_count = 0;
+    var finished = 0;
+    var startTime;
+
+    function validate(input) {
+      buf = newString(Module, input);
+      r = Module.validate(buf);
+      Module.dealloc_str(buf);
+      return r;
+    }
+
+    function decode() {
+      startTime = new Date();
+      // validate input
+      input = document.getElementById("input").value;
+      output = document.getElementById('output');
+      progress = document.getElementById('progress');
+      output.hidden = false;
+      output.value = "";
+      progress.hidden = false;
+
+      hash_count = validate(input);
+      if (hash_count < 1) {
+        progress.innerText = "no inputs";
+        return;
+      }
+      results = new Array(hash_count);
+
+      // start workers
+      finished = 0;
+      updateProgress();
+      if (workers.length == 0) {
+        t = document.getElementById("thread_num");
+        thread_num = t.value;
+        t.readonly = true;
+        workers = new Array(thread_num);
+        for (i = 0; i < thread_num; i++) {
+          workers[i] = new Worker("worker.js");
+          workers[i].onmessage = onProgress;
+        }
+      }
+      // send decode instruction
+      for (i = 0; i < thread_num; i++) {
+        workers[i].postMessage({ 'thread_num': thread_num, 'threadid': i, 'input': input });
+      }
+    }
+
+    function onProgress(e) {
+      finished += 1;
+      updateProgress();
+      output = document.getElementById('output');
+      results[e.data.i]={hash:e.data.hash, mobile:e.data.mobile};
+      newline = e.data.hash +","+ e.data.mobile + "\n";
+      output.value += newline;
+
+      if (finished == hash_count) {
+        // update output
+        output.value = "";
+        for (i = 0; i < hash_count; i++) {
+          newline = results[i].hash +","+ results[i].mobile + "\n";
+          output.value += newline;
+        }
+        // stop workers
+        for (i = 0; i < thread_num; i++) {
+          workers[i].terminate();
+        }
+        workers = [];
+      }
+    }
+
+    function updateProgress() {
+      progress = document.getElementById('progress');
+      if (finished < hash_count) {
+        progress.innerText = "working... " + finished + "/" + hash_count + " are decoded";
+      } else {
+        cost = (new Date() - startTime) / 1000;
+        progress.innerText = "completed in " + cost + "seconds.";
+      }
+    }
+  </script>
+</body>
+
+</html>
