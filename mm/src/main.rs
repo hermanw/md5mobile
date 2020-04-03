@@ -19,7 +19,7 @@ use std::sync::{mpsc, Arc, Mutex};
 //  ('166', 14720), ('170', 4409), ('198', 4110), ('171', 1438),
 //  ('191', 145), ('145', 40), ('165', 2), ('172', 1),
 //  ('154', 1), ('146', 1)]
-const PREFIX_LIST: [usize; 46] = [
+const PREFIX_LIST: [u64; 46] = [
 186, 158, 135, 159,
 136, 150, 137, 138,
 187, 151, 182, 152,
@@ -33,7 +33,7 @@ const PREFIX_LIST: [usize; 46] = [
 191, 145, 165, 172, 
 154, 146
 ];
-const MOBILE_SPAN_LEN: usize = 100000000;
+const MOBILE_SPAN_LEN: u64 = 100000000;
 const SLICE_NUM: usize = 10;    // each thread divides its span into slices
 
 // the data structure of the formula
@@ -55,7 +55,7 @@ fn main() {
 
     // process the file and get a md5 hash list
     print!("Loading file {}... ", filename);
-    let mut v_hash: Vec<(String, usize)> = vec![];
+    let mut v_hash: Vec<(String, u64, u32)> = vec![];   // (hash,mobile,hash_bytes_prefix)
     match std::fs::read_to_string(&filename) {
         Err(_) => {
             println!("couldn't open {}", filename);
@@ -65,11 +65,16 @@ fn main() {
             for s in v {
                 let s = s.trim();
                 if s.len() > 0 {
-                    v_hash.push((s.to_string(),0));
+                    let hash = s.to_string();
+                    let hash_bytes = hex::decode(s.to_string()).unwrap();
+                    unsafe {
+                        let hash_bytes_prefix = *(hash_bytes.as_ptr() as *const u32);
+                        v_hash.push((hash,0,hash_bytes_prefix));
+                    }
                 }
             }
         }
-    }
+    }    
     let v_hash_len = v_hash.len();
     if v_hash_len == 0 {
         println!("no valid hash");
@@ -86,7 +91,7 @@ fn main() {
     let v_hash_mutex = Arc::new(Mutex::new(v_hash));
     let finished: usize = 0;
     let finished_mutex = Arc::new(Mutex::new(finished));
-    let slice_len = MOBILE_SPAN_LEN / thread_num / SLICE_NUM;
+    let slice_len = MOBILE_SPAN_LEN as usize / thread_num / SLICE_NUM;
 
     //create threads
     let (tx, rx) = mpsc::channel();
@@ -104,13 +109,13 @@ fn main() {
             let mut v = alloc_big_vec(slice_len);
             // start to work on each prefix
             for prefix in 0..PREFIX_LIST.len() {
+                let prefix_num = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN;
                 // work on each slice
                 for slice in 0..SLICE_NUM {
                     // step 1: compute md5
                     for i in 0..slice_len {
-                        let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN
-                            + (threadid * SLICE_NUM + slice) * slice_len
-                            + i;
+                        let mobile = (threadid * SLICE_NUM + slice) * slice_len + i;
+                        let mobile = prefix_num + mobile as u64;
                         let hash = md5::compute(mobile.to_string());
                         unsafe {
                             v[i].hash = *(hash.as_ptr() as *const u32);
@@ -123,7 +128,7 @@ fn main() {
                     for i in 0..v_hash_len {
                         #[allow(unused_assignments)]
                         let mut hash: u32 = 0;
-                        {
+                        { // important trick for thread locks
                             // check if already decoded
                             let v_hash = v_hash_clone.lock().unwrap();
                             let finished = finished_clone.lock().unwrap();
@@ -131,10 +136,7 @@ fn main() {
                             if v_hash[i].1 != 0 { continue;}
 
                             // still some hash not decoded
-                            let hash_bytes = hex::decode(&v_hash[i].0).unwrap();
-                            unsafe {
-                                hash = *(hash_bytes.as_ptr() as *const u32);
-                            }
+                            hash = v_hash[i].2;
                         }
 
                         let result = v.binary_search_by(|probe| probe.hash.cmp(&hash));
@@ -143,10 +145,10 @@ fn main() {
                                 // verify and find the corect match
                                 let mut i_result = index;
                                 while v[i_result].hash == hash {
-                                    let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN
-                                        + (threadid * SLICE_NUM + slice) * slice_len
+                                    let mobile = (threadid * SLICE_NUM + slice) * slice_len
                                         + v[i_result].mobile_index as usize;
-                                    
+                                    let mobile = prefix_num + mobile as u64;
+                                
                                     let hash_i = md5::compute(mobile.to_string());
                                     let mut v_hash = v_hash_clone.lock().unwrap();
                                     if format!("{:?}", hash_i) == v_hash[i].0 {
@@ -168,7 +170,7 @@ fn main() {
                             }
                         }
                     }
-                    // send progress
+                    // send progress                    
                     tx_clone.send((threadid, prefix, slice, 0)).unwrap();
                     if *finished_clone.lock().unwrap() == v_hash_len {break;} // check if work done
                 } 
