@@ -3,6 +3,7 @@ use std::ffi::CString;
 
 extern {
     fn sendProgress(i:usize, hash: *const c_char, mobile: *const c_char);
+    #[allow(dead_code)]
     fn printToJS(log: *const c_char);
 }
 
@@ -14,11 +15,12 @@ pub fn send_progress(i:usize, hash:&String, mobile: u64) {
     }
 }
 
+#[allow(unused_variables)]
 pub fn print_jslog(log: String) {
-    let s = CString::new(log).unwrap().into_raw();
-    unsafe{
-        printToJS(s);
-    }
+    // let s = CString::new(log).unwrap().into_raw();
+    // unsafe{
+    //     printToJS(s);
+    // }
 }
 
 const PREFIX_LIST: [u64; 46] = [
@@ -44,7 +46,7 @@ struct Pair {
     mobile_index: u32,
 }
 
-pub fn decode(mut v_hash: Vec<(String, u64)>, thread_num: usize, threadid: usize) -> Vec<(String, u64)> {
+pub fn decode(mut v_hash: Vec<(String, u64, u32)>, thread_num: usize, threadid: usize) -> Vec<(String, u64, u32)> {
     let v_hash_len = v_hash.len();
     if v_hash_len == 0 {
         // TODO
@@ -60,12 +62,13 @@ pub fn decode(mut v_hash: Vec<(String, u64)>, thread_num: usize, threadid: usize
     }
     // start to work on each prefix
     for prefix in 0..PREFIX_LIST.len() {
+        let prefix_num = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN;
         // work on each slice
         for slice in 0..SLICE_NUM {
             // step 1: compute md5
             for i in 0..slice_len {
                 let mobile = (threadid * SLICE_NUM + slice) * slice_len + i;
-                let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + mobile as u64;
+                let mobile = prefix_num + mobile as u64;
                 let hash = md5::compute(mobile.to_string());
                 unsafe {
                     v[i].hash = *(hash.as_ptr() as *const u32);
@@ -79,16 +82,13 @@ pub fn decode(mut v_hash: Vec<(String, u64)>, thread_num: usize, threadid: usize
             for i in 0..v_hash_len {
                 #[allow(unused_assignments)]
                 let mut hash: u32 = 0;
-                {
+                { // important trick for thread locks
                     // check if already decoded
                     if finished == v_hash_len {break;}
                     if v_hash[i].1 != 0 { continue;}
 
                     // still some hash not decoded
-                    let hash_bytes = hex::decode(&v_hash[i].0).unwrap();
-                    unsafe {
-                        hash = *(hash_bytes.as_ptr() as *const u32);
-                    }
+                    hash = v_hash[i].2;
                 }
 
                 let result = v.binary_search_by(|probe| probe.hash.cmp(&hash));
@@ -99,7 +99,7 @@ pub fn decode(mut v_hash: Vec<(String, u64)>, thread_num: usize, threadid: usize
                         while v[i_result].hash == hash {
                             let mobile = (threadid * SLICE_NUM + slice) * slice_len
                                 + v[i_result].mobile_index as usize;
-                            let mobile = PREFIX_LIST[prefix] * MOBILE_SPAN_LEN + mobile as u64;
+                            let mobile = prefix_num + mobile as u64;
                             
                             let hash_i = md5::compute(mobile.to_string());
                             if format!("{:?}", hash_i) == v_hash[i].0 {

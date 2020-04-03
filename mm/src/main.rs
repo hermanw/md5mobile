@@ -63,7 +63,7 @@ fn main() {
         Ok(buf) => {
             let v: Vec<&str> = buf.split(',').collect();
             for s in v {
-                let s = s.trim();
+                let s = s.trim().to_lowercase();
                 if s.len() > 0 {
                     let hash = s.to_string();
                     let hash_bytes = hex::decode(s.to_string()).unwrap();

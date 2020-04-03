@@ -32,15 +32,18 @@ pub extern "C" fn validate(data: *mut c_char) -> usize {
 }
 
 
-fn prep(data: *mut c_char) -> Vec<(String, u64)> {
+fn prep(data: *mut c_char) -> Vec<(String, u64, u32)> {
     unsafe {
         let data = CStr::from_ptr(data);
-        let mut v_hash: Vec<(String, u64)> = vec![];
+        let mut v_hash: Vec<(String, u64, u32)> = vec![];
         let v: Vec<&str> = data.to_str().unwrap().split(',').collect();
         for s in v {
             let s = s.trim().to_lowercase();
             if s.len() > 0 {
-                v_hash.push((s.to_string(),0));
+                let hash = s.to_string();
+                let hash_bytes = hex::decode(s.to_string()).unwrap();
+                let hash_bytes_prefix = *(hash_bytes.as_ptr() as *const u32);
+                v_hash.push((hash,0,hash_bytes_prefix));
             }
         }
         v_hash
