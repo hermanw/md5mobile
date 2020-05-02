@@ -1,0 +1,11 @@
+[package]
+name = "mi"
+version = "0.1.0"
+authors = ["herman"]
+edition = "2018"
+
+[dependencies]
+md5 = "0.6.1"
+console = "0.8.0"
+hex = "0.3.2"
+num_cpus = "1.10.1"

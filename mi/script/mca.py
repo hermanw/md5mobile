@@ -87,9 +87,18 @@ for codepage in reversed(codepagelist):
         merged[code] = codemap[code]
     file.close()
 
-# wrtie to file merged.csv
+# wrtie to file merged.csv and mca.rs
 print("merged: " + str(len(merged)))
 file = open('merged.csv', "w")
+file_mca = open('../src/mca.rs', "w")
+file_mca.write('pub const AREA_SIZE: usize = '+ str(len(merged)) +';\n')
+file_mca.write('pub const AREA: [usize; AREA_SIZE] = [\n')
+
 for code in merged.keys():
     file.write(code+','+merged[code]+'\n')
+    file_mca.write(code+',')
+
+file_mca.write('\n];\n')
+
 file.close()
+file_mca.close()
