@@ -53,12 +53,17 @@ fn main() {
             if year_num * thread_num + threadid < YEAR_NUM {
                 year_num += 1;
             }
+            // alloc memory
+            let mut v: Vec<Pair> = Vec::with_capacity(SLICE_SIZE);
+            unsafe {
+                v.set_len(SLICE_SIZE);
+            }
             // each seq block
             for seq_block in 0..SEQ_BLOCK {
                 // each year
                 for i in 0..year_num {
                     let year = get_thread_year(thread_num, threadid, i);
-                    thread_work(threadid,year,seq_block, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
+                    thread_work(threadid,&mut v,year,seq_block, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
                     if *finished_clone.lock().unwrap() == v_hash_len {
                         break;
                     } // check if work done
@@ -153,13 +158,7 @@ fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
     true
 }
 
-fn generate_ids(year:usize, seq_block:usize) -> Vec<Pair>  {
-    // alloc memory
-    let mut v: Vec<Pair> = Vec::with_capacity(SLICE_SIZE);
-    unsafe {
-        v.set_len(SLICE_SIZE);
-    }
-
+fn generate_ids(v:&mut Vec<Pair>, year:usize, seq_block:usize) {
     let mut i: usize = 0;
     let seq_offset = seq_block * SEQ_BLOCK_SIZE;
     for area in mca::AREA.iter() {
@@ -180,7 +179,6 @@ fn generate_ids(year:usize, seq_block:usize) -> Vec<Pair>  {
             }
         }
     }
-    v
 }
 
 fn generate_id(area:usize,year:usize,month:usize,day:usize,seq:usize) -> u64{
@@ -212,14 +210,14 @@ fn generate_id_string(id: u64) -> String {
     id_string
 }
 
-fn thread_work(threadid:usize, year:usize, seq_block:usize, 
+fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, seq_block:usize, 
     v_hash_clone:&Arc<Mutex<Vec<(String, u64, u32)>>>, 
     v_hash_len:usize, 
     finished_clone:&Arc<Mutex<usize>>, 
     tx_clone:&mpsc::Sender<(usize,usize,usize,usize)>) {
 
     // step 1: generate id list & compute md5
-    let mut v = generate_ids(year, seq_block);
+    generate_ids(v, year, seq_block);
     // step 2: sort
     v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
     // step 3: look up all hashes
@@ -250,10 +248,6 @@ fn thread_work(threadid:usize, year:usize, seq_block:usize,
                 while v[i_result].hash == hash {
                     let id = v[i_result].id;
                     let id_string = generate_id_string(id);
-                    // let mobile = (threadid * SLICE_NUM + slice) * slice_len
-                    //     + v[i_result].mobile_index as usize;
-                    // let mobile = prefix_num + mobile as u64;
-
                     let hash_i = md5::compute(id_string);
                     let mut v_hash = v_hash_clone.lock().unwrap();
                     if format!("{:?}", hash_i) == v_hash[i].0 {
