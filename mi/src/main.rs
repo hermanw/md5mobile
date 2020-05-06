@@ -7,6 +7,7 @@ use std::time::Instant;
 use std::sync::{mpsc, Arc, Mutex};
 
 mod mca;
+mod year;
 
 // the data structure of the formula
 struct Pair {
@@ -14,10 +15,9 @@ struct Pair {
     id: u64
 }
 
-const YEAR_NUM: usize = 80;
 const DAYS: [usize; 12] = [31,29,31,30,31,30,31,31,30,31,30,31];
 const SEQ_SIZE: usize = 1000;
-const SEQ_BLOCK: usize = 100;
+const SEQ_BLOCK: usize = 1000;
 const SEQ_BLOCK_SIZE: usize = SEQ_SIZE / SEQ_BLOCK;
 const SLICE_SIZE: usize = mca::AREA_SIZE * 366 * SEQ_BLOCK_SIZE;
 const COE: [usize; 17] =[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2];
@@ -49,8 +49,8 @@ fn main() {
                 thread::sleep(std::time::Duration::from_millis(200 * threadid as u64));
             }
             // assign years to each thread
-            let mut year_num = YEAR_NUM/thread_num;
-            if year_num * thread_num + threadid < YEAR_NUM {
+            let mut year_num = year::YEAR_SIZE/thread_num;
+            if year_num * thread_num + threadid < year::YEAR_SIZE {
                 year_num += 1;
             }
             // alloc memory
@@ -58,10 +58,10 @@ fn main() {
             unsafe {
                 v.set_len(SLICE_SIZE);
             }
-            // each seq block
-            for seq_block in 0..SEQ_BLOCK {
-                // each year
-                for i in 0..year_num {
+            // each year
+            for i in 0..year_num {
+                // each seq block
+                for seq_block in 0..SEQ_BLOCK {
                     let year = get_thread_year(thread_num, threadid, i);
                     thread_work(threadid,&mut v,year,seq_block, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
                     if *finished_clone.lock().unwrap() == v_hash_len {
@@ -91,7 +91,7 @@ fn main() {
         term.write_str(&thread_str).unwrap();
         term.move_cursor_down(thread_num - threadid).unwrap();
         term.clear_line().unwrap();
-        term.write_str(&format!("{}/{} decoded @{:?}", hash_finished, v_hash_len, start.elapsed())).unwrap();
+        term.write_str(&format!("{}/{} decoded @{}", hash_finished, v_hash_len, start.elapsed().as_secs())).unwrap();
     }
     for i in 0..thread_num {
         term.move_cursor_up(thread_num - i).unwrap();
@@ -99,7 +99,7 @@ fn main() {
         term.write_str(&format!("Thread {} stoped", i)).unwrap();
         term.move_cursor_down(thread_num - i).unwrap();
     }
-    println!("\nCompleted @{:?}", start.elapsed());
+    println!("\nCompleted {}", start.elapsed().as_secs());
 
     // write result to file
     let args: Vec<String> = env::args().collect();
@@ -276,16 +276,6 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, seq_block:usize,
 }
 
 fn get_thread_year(thread_num: usize, threadid:usize, i:usize) -> usize {
-    let mut year = 1980;
-    let index = (threadid + thread_num * i) as isize;
-    if index < 20 {
-        year += index;
-    } else if index < 50 {
-        year -= index - 19;
-    } else if index < 60 {
-        year += index - 30;
-    } else {
-        year -= index - 29;
-    }
-    year as usize
+    let index = threadid + thread_num * i;
+    year::YEAR[index]
 }
