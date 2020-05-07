@@ -17,9 +17,8 @@ struct Pair {
 
 const DAYS: [usize; 12] = [31,29,31,30,31,30,31,31,30,31,30,31];
 const SEQ_SIZE: usize = 1000;
-const SEQ_BLOCK: usize = 1000;
-const SEQ_BLOCK_SIZE: usize = SEQ_SIZE / SEQ_BLOCK;
-const SLICE_SIZE: usize = mca::AREA_SIZE * 366 * SEQ_BLOCK_SIZE;
+const AREA_BATCH_SIZE : usize = 10;
+const SLICE_SIZE: usize = 366 * SEQ_SIZE * AREA_BATCH_SIZE;
 const COE: [usize; 17] =[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2];
 
 fn main() {
@@ -48,22 +47,19 @@ fn main() {
                 // allow some interval to avoid conflict in accessing mutex
                 thread::sleep(std::time::Duration::from_millis(200 * threadid as u64));
             }
-            // assign years to each thread
-            let mut year_num = year::YEAR_SIZE/thread_num;
-            if year_num * thread_num + threadid < year::YEAR_SIZE {
-                year_num += 1;
-            }
             // alloc memory
             let mut v: Vec<Pair> = Vec::with_capacity(SLICE_SIZE);
             unsafe {
                 v.set_len(SLICE_SIZE);
             }
             // each year
-            for i in 0..year_num {
-                // each seq block
-                for seq_block in 0..SEQ_BLOCK {
-                    let year = get_thread_year(thread_num, threadid, i);
-                    thread_work(threadid,&mut v,year,seq_block, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
+            for year in &year::YEAR {
+                let areas = mca::get_mca(*year);
+                // each assigned area
+                let mut i_area = threadid * AREA_BATCH_SIZE;
+                while i_area < areas.len() {
+                    thread_work(threadid,&mut v,*year,&areas,i_area, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
+                    i_area += thread_num * AREA_BATCH_SIZE;
                     if *finished_clone.lock().unwrap() == v_hash_len {
                         break;
                     } // check if work done
@@ -79,11 +75,11 @@ fn main() {
     // recieve progress from threads
     let term = Term::stdout();
     let mut hash_finished = 0;
-    for (threadid, year, seq_block, finished) in rx {
+    for (threadid, year, percent, finished) in rx {
         // print progress
         let thread_str = format!(
-            "Thread {} working... {}-{}",
-            threadid,year,seq_block
+            "Thread {} working... {} {}%",
+            threadid,year,percent
         );
         if finished > 0 {hash_finished = finished;}
         term.move_cursor_up(thread_num - threadid).unwrap();
@@ -99,7 +95,7 @@ fn main() {
         term.write_str(&format!("Thread {} stoped", i)).unwrap();
         term.move_cursor_down(thread_num - i).unwrap();
     }
-    println!("\nCompleted {}", start.elapsed().as_secs());
+    println!("\nCompleted @{}", start.elapsed().as_secs());
 
     // write result to file
     let args: Vec<String> = env::args().collect();
@@ -158,15 +154,18 @@ fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
     true
 }
 
-fn generate_ids(v:&mut Vec<Pair>, year:usize, seq_block:usize) {
+fn generate_ids(v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, i_area:usize) {
     let mut i: usize = 0;
-    let seq_offset = seq_block * SEQ_BLOCK_SIZE;
-    for area in mca::AREA.iter() {
+    for offset in 0..AREA_BATCH_SIZE {
+        let current_area = i_area + offset;
+        if current_area >= areas.len() {
+            break;
+        }
+        let area = areas[current_area];
         for month in 0..DAYS.len() {
             for day in 0..DAYS[month] {
-                for seq_index in 0..SEQ_BLOCK_SIZE { 
-                    let seq = seq_index + seq_offset;                 
-                    let id = generate_id(*area,year,month,day,seq);
+                for seq in 0..SEQ_SIZE { 
+                    let id = generate_id(area,year,month,day,seq);
                     let id_string = generate_id_string(id);
                     // println!("{},{},{}", i,id,id_string);
                     let hash = md5::compute(id_string);
@@ -210,14 +209,14 @@ fn generate_id_string(id: u64) -> String {
     id_string
 }
 
-fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, seq_block:usize, 
+fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, i_area:usize, 
     v_hash_clone:&Arc<Mutex<Vec<(String, u64, u32)>>>, 
     v_hash_len:usize, 
     finished_clone:&Arc<Mutex<usize>>, 
     tx_clone:&mpsc::Sender<(usize,usize,usize,usize)>) {
 
     // step 1: generate id list & compute md5
-    generate_ids(v, year, seq_block);
+    generate_ids(v, year, &areas, i_area);
     // step 2: sort
     v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
     // step 3: look up all hashes
@@ -255,7 +254,7 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, seq_block:usize,
                         v_hash[i].1 = id;
                         *finished += 1;
                         tx_clone
-                            .send((threadid, year, seq_block, *finished))
+                            .send((threadid, year, i_area*100/areas.len(), *finished))
                             .unwrap();
                         break;
                     }
@@ -272,10 +271,5 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, seq_block:usize,
         }
     }
     // step 4: send progress
-    tx_clone.send((threadid, year, seq_block, 0)).unwrap();
-}
-
-fn get_thread_year(thread_num: usize, threadid:usize, i:usize) -> usize {
-    let index = threadid + thread_num * i;
-    year::YEAR[index]
+    tx_clone.send((threadid, year, i_area*100/areas.len(), 0)).unwrap();
 }

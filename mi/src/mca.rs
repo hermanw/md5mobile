@@ -2,7 +2,13 @@ const FN_MCA: [fn()->Vec<usize>; 40] = [
     get_mca_1980,get_mca_1981,get_mca_1982,get_mca_1983,get_mca_1984,get_mca_1985,get_mca_1986,get_mca_1987,get_mca_1988,get_mca_1989,get_mca_1990,get_mca_1991,get_mca_1992,get_mca_1993,get_mca_1994,get_mca_1995,get_mca_1996,get_mca_1997,get_mca_1998,get_mca_1999,get_mca_2000,get_mca_2001,get_mca_2002,get_mca_2003,get_mca_2004,get_mca_2005,get_mca_2006,get_mca_2007,get_mca_2008,get_mca_2009,get_mca_2010,get_mca_2011,get_mca_2012,get_mca_2013,get_mca_2014,get_mca_2015,get_mca_2016,get_mca_2017,get_mca_2018,get_mca_2019,];
 
 pub fn get_mca(year : usize) -> Vec<usize> {
-    FN_MCA[year - 1980]()
+    let mut index = year as isize - 1980;
+    if index < 0 {
+        index = 0;
+    } else if index > 39 {
+        index = 39;
+    }
+    FN_MCA[index as usize]()
 }
 
 fn get_mca_1980() -> Vec<usize> {
