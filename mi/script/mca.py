@@ -73,17 +73,7 @@ for page in range(9,len(urllist)):
 
 print(len(codepagelist))
 
-# create mca.rs
-file_mca = open('../src/mca.rs', "w")
-file_mca.write('const FN_MCA: [fn()->Vec<usize>; '+ str(len(codepagelist)) +'] = [\n    ')
-for year in range(len(codepagelist)):
-    file_mca.write('get_mca_'+str(1980+year)+',')
-file_mca.write('];\n\n')
-file_mca.write('pub fn get_mca(year : usize) -> Vec<usize> {')
-file_mca.write('\n    FN_MCA[year - 1980]()\n}\n\n')
-
-# parse each page and merge the code map
-merged = {}
+# parse each page
 # codepagelist.append(('test','http://www.mca.gov.cn/article/sj/xzqh/1980/201705/201705311652.html'))
 for codepage in reversed(codepagelist):
     print(codepage[0])
@@ -91,24 +81,8 @@ for codepage in reversed(codepagelist):
     codemap = getcodemap(codepage[1])
     print(len(codemap))
     
-    file_mca.write('fn get_mca_'+codepage[0][:4]+'() -> Vec<usize> {')
-    file_mca.write('\n    vec![')
-    file = open(codepage[0]+'.csv', "w")
+    file = open(codepage[0][:4]+'.csv', "w")
     for code in codemap.keys():
-        file_mca.write(code+',')
         file.write(code+','+codemap[code]+'\n')
-        merged[code] = codemap[code]
     file.close()
-    file_mca.write(']\n}\n\n')
 
-# close mca.rs
-file_mca.close()
-
-# write to file merged.csv
-print("merged: " + str(len(merged)))
-file = open('merged.csv', "w")
-
-for code in merged.keys():
-    file.write(code+','+merged[code]+'\n')
-
-file.close()
