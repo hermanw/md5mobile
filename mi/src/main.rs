@@ -5,6 +5,7 @@ use std::io::Write;
 use std::thread;
 use std::time::Instant;
 use std::sync::{mpsc, Arc, Mutex};
+use md5::{Md5, Digest};
 
 mod mca;
 mod year;
@@ -20,6 +21,7 @@ const SEQ_SIZE: usize = 1000;
 const AREA_BATCH_SIZE : usize = 10;
 const SLICE_SIZE: usize = 366 * SEQ_SIZE * AREA_BATCH_SIZE;
 const COE: [usize; 17] =[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2];
+const C_SUM: [&str; 11] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "X"];
 
 fn main() {
     let mut v_hash: Vec<(String, u64, u32)> = vec![]; // (hash,id,hash_bytes_prefix)
@@ -154,21 +156,53 @@ fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
     true
 }
 
-fn generate_ids(v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, i_area:usize) {
+fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<usize>>, year:usize, areas:&Vec<usize>, i_area:usize) {
     let mut i: usize = 0;
+    let mut id_string = String::from("123456789012345678");
+    let mut md5 = Md5::new();
     for offset in 0..AREA_BATCH_SIZE {
         let current_area = i_area + offset;
         if current_area >= areas.len() {
             break;
         }
-        let area = areas[current_area];
+        let area = areas[current_area] as u64;
+        let area_year = area * 100000000000 + year as u64 * 10000000;
+        let mut sum_area_year = 0;
+        let mut t = areas[current_area];
+        for i in 0..6 {
+            sum_area_year += (t % 10) * COE[5-i];
+            t = t / 10;
+        }
+        let mut t = year;
+        for i in 0..4 {
+            sum_area_year += (t % 10) * COE[9-i];
+            t = t / 10;
+        }
+        id_string.replace_range(0..6, &v_strings[0][current_area as usize]);
+        id_string.replace_range(6..10, &v_strings[1][0]);
+        let mut area_year_month = area_year;
         for month in 0..DAYS.len() {
+            area_year_month += 100000;
+            let sum_area_year_month = sum_area_year + v_sums[0][month];
+            id_string.replace_range(10..12, &v_strings[2][month+1]);
+            let mut area_year_month_day = area_year_month;
             for day in 0..DAYS[month] {
+                area_year_month_day += 1000;
+                let sum_area_year_month_day = sum_area_year_month + v_sums[1][day];
+                id_string.replace_range(12..14, &v_strings[2][day+1]);
                 for seq in 0..SEQ_SIZE { 
-                    let id = generate_id(area,year,month,day,seq);
-                    let id_string = generate_id_string(id);
-                    // println!("{},{},{}", i,id,id_string);
-                    let hash = md5::compute(id_string);
+                    let id = area_year_month_day + seq as u64;
+                    id_string.replace_range(14..17, &v_strings[3][seq]);
+                    let sum = sum_area_year_month_day + v_sums[2][seq];
+                    let mut r = sum % 11;
+                    r = 12 - r;
+                    if r > 10 {
+                        r = r - 11;
+                    }
+                    id_string.replace_range(17..18, C_SUM[r]);
+                    if i<100 { println!("{},{}", id,id_string);}
+                    md5.input(&id_string);
+                    let hash = md5.result_reset();
                     unsafe {
                         v[i].hash = *(hash.as_ptr() as *const u32);
                     }
@@ -180,13 +214,56 @@ fn generate_ids(v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, i_area:usize) {
     }
 }
 
-fn generate_id(area:usize,year:usize,month:usize,day:usize,seq:usize) -> u64{
-    let mut id = area as u64;
-    id = id * 10000 + year as u64;
-    id = id * 100 + month as u64 + 1;
-    id = id * 100 + day as u64 + 1;
-    id = id * 1000 + seq as u64 + 1;
-    id
+fn generate_v_strings(areas:&Vec<usize>) -> Vec<Vec<String>> {
+    let mut v_area = Vec::with_capacity(areas.len());
+    for area in areas {
+        v_area.push(area.to_string());
+    }
+    let mut v_year = Vec::with_capacity(year::YEAR_SIZE);
+    for year in &year::YEAR {
+        v_year.push(year.to_string());
+    }
+    let mut v_100 = Vec::with_capacity(100);
+    for i in 0..100 {
+        v_100.push(format!("{:02}",i));
+    }
+    let mut v_1000 = Vec::with_capacity(1000);
+    for i in 0..1000 {
+        v_1000.push(format!("{:03}",i));
+    }
+    let mut v = Vec::with_capacity(4);
+    v.push(v_area);
+    v.push(v_year);
+    v.push(v_100);
+    v.push(v_1000);
+    v
+}
+
+fn generate_v_sums() -> Vec<Vec<usize>> {
+    let mut v_month = Vec::with_capacity(12);
+    for i in 0..12 {
+        let mut sum = ((i+1) / 10) * COE[10];
+        sum += ((i+1) % 10) * COE[11];
+        v_month.push(sum);
+    }
+    let mut v_day = Vec::with_capacity(31);
+    for i in 0..31 {
+        let mut sum = ((i+1) / 10) * COE[12];
+        sum += ((i+1) % 10) * COE[13];
+        v_day.push(sum);
+    }
+    let mut v_seq = Vec::with_capacity(1000);
+    for i in 0..1000 {
+        let mut sum = (i / 100) * COE[14];
+        sum += ((i%100) / 10) * COE[15];
+        sum += (i%10) * COE[16];
+        v_seq.push(sum);
+    }
+    let mut v = Vec::with_capacity(3);
+    v.push(v_month);
+    v.push(v_day);
+    v.push(v_seq);
+    v
 }
 
 fn generate_id_string(id: u64) -> String {
@@ -215,8 +292,12 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, 
     finished_clone:&Arc<Mutex<usize>>, 
     tx_clone:&mpsc::Sender<(usize,usize,usize,usize)>) {
 
+    // step 0: generate helper data
+    let v_strings = generate_v_strings(&areas);
+    let v_sums = generate_v_sums();
+
     // step 1: generate id list & compute md5
-    generate_ids(v, year, &areas, i_area);
+    generate_ids(v, &v_strings, &v_sums, year, &areas, i_area);
     // step 2: sort
     v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
     // step 3: look up all hashes
@@ -247,7 +328,9 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, 
                 while v[i_result].hash == hash {
                     let id = v[i_result].id;
                     let id_string = generate_id_string(id);
-                    let hash_i = md5::compute(id_string);
+                    let mut md5 = Md5::new();
+                    md5.input(id_string);
+                    let hash_i = md5.result();
                     let mut v_hash = v_hash_clone.lock().unwrap();
                     if format!("{:?}", hash_i) == v_hash[i].0 {
                         let mut finished = finished_clone.lock().unwrap();

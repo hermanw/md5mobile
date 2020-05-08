@@ -5,7 +5,7 @@ authors = ["herman"]
 edition = "2018"
 
 [dependencies]
-md5 = "0.6.1"
+md-5 = { version = "0.8.0", features = ["asm"] }
 console = "0.8.0"
 hex = "0.3.2"
 num_cpus = "1.10.1"
