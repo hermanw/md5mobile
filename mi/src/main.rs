@@ -179,7 +179,7 @@ fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<u
             t = t / 10;
         }
         id_string.replace_range(0..6, &v_strings[0][current_area as usize]);
-        id_string.replace_range(6..10, &v_strings[1][0]);
+        id_string.replace_range(6..10, &v_strings[1][year-1970]);
         let mut area_year_month = area_year;
         for month in 0..DAYS.len() {
             area_year_month += 100000;
@@ -200,7 +200,7 @@ fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<u
                         r = r - 11;
                     }
                     id_string.replace_range(17..18, C_SUM[r]);
-                    if i<100 { println!("{},{}", id,id_string);}
+                    // if i<100 { println!("{},{}", id,id_string);}
                     md5.input(&id_string);
                     let hash = md5.result_reset();
                     unsafe {
@@ -220,7 +220,7 @@ fn generate_v_strings(areas:&Vec<usize>) -> Vec<Vec<String>> {
         v_area.push(area.to_string());
     }
     let mut v_year = Vec::with_capacity(year::YEAR_SIZE);
-    for year in &year::YEAR {
+    for year in 1970..2001 {
         v_year.push(year.to_string());
     }
     let mut v_100 = Vec::with_capacity(100);
@@ -329,10 +329,10 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, 
                     let id = v[i_result].id;
                     let id_string = generate_id_string(id);
                     let mut md5 = Md5::new();
-                    md5.input(id_string);
+                    md5.input(&id_string);
                     let hash_i = md5.result();
                     let mut v_hash = v_hash_clone.lock().unwrap();
-                    if format!("{:?}", hash_i) == v_hash[i].0 {
+                    if hex::encode(hash_i) == v_hash[i].0 {
                         let mut finished = finished_clone.lock().unwrap();
                         v_hash[i].1 = id;
                         *finished += 1;
