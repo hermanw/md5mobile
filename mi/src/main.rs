@@ -18,7 +18,7 @@ struct Pair {
 
 const DAYS: [usize; 12] = [31,29,31,30,31,30,31,31,30,31,30,31];
 const SEQ_SIZE: usize = 1000;
-const AREA_BATCH_SIZE : usize = 10;
+const AREA_BATCH_SIZE : usize = 20;
 const SLICE_SIZE: usize = 366 * SEQ_SIZE * AREA_BATCH_SIZE;
 const COE: [usize; 17] =[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2];
 const C_SUM: [&str; 11] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "X"];
@@ -56,11 +56,10 @@ fn main() {
             }
             // each year
             for year in &year::YEAR {
-                let areas = mca::get_mca(*year);
                 // each assigned area
                 let mut i_area = threadid * AREA_BATCH_SIZE;
-                while i_area < areas.len() {
-                    thread_work(threadid,&mut v,*year,&areas,i_area, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
+                while i_area < mca::MCA_SIZE {
+                    thread_work(threadid,&mut v,*year,i_area, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
                     i_area += thread_num * AREA_BATCH_SIZE;
                     if *finished_clone.lock().unwrap() == v_hash_len {
                         break;
@@ -156,19 +155,19 @@ fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
     true
 }
 
-fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<usize>>, year:usize, areas:&Vec<usize>, i_area:usize) {
+fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<usize>>, year:usize, i_area:usize) {
     let mut i: usize = 0;
     let mut id_string = String::from("123456789012345678");
     let mut md5 = Md5::new();
     for offset in 0..AREA_BATCH_SIZE {
         let current_area = i_area + offset;
-        if current_area >= areas.len() {
+        if current_area >= mca::MCA_SIZE {
             break;
         }
-        let area = areas[current_area] as u64;
+        let area = mca::MCA[current_area] as u64;
         let area_year = area * 100000000000 + year as u64 * 10000000;
         let mut sum_area_year = 0;
-        let mut t = areas[current_area];
+        let mut t = mca::MCA[current_area];
         for i in 0..6 {
             sum_area_year += (t % 10) * COE[5-i];
             t = t / 10;
@@ -214,9 +213,9 @@ fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<u
     }
 }
 
-fn generate_v_strings(areas:&Vec<usize>) -> Vec<Vec<String>> {
-    let mut v_area = Vec::with_capacity(areas.len());
-    for area in areas {
+fn generate_v_strings() -> Vec<Vec<String>> {
+    let mut v_area = Vec::with_capacity(mca::MCA_SIZE);
+    for area in mca::MCA.iter() {
         v_area.push(area.to_string());
     }
     let mut v_year = Vec::with_capacity(year::YEAR_SIZE);
@@ -286,18 +285,18 @@ fn generate_id_string(id: u64) -> String {
     id_string
 }
 
-fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, i_area:usize, 
+fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, i_area:usize, 
     v_hash_clone:&Arc<Mutex<Vec<(String, u64, u32)>>>, 
     v_hash_len:usize, 
     finished_clone:&Arc<Mutex<usize>>, 
     tx_clone:&mpsc::Sender<(usize,usize,usize,usize)>) {
 
     // step 0: generate helper data
-    let v_strings = generate_v_strings(&areas);
+    let v_strings = generate_v_strings();
     let v_sums = generate_v_sums();
 
     // step 1: generate id list & compute md5
-    generate_ids(v, &v_strings, &v_sums, year, &areas, i_area);
+    generate_ids(v, &v_strings, &v_sums, year, i_area);
     // step 2: sort
     v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
     // step 3: look up all hashes
@@ -337,7 +336,7 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, 
                         v_hash[i].1 = id;
                         *finished += 1;
                         tx_clone
-                            .send((threadid, year, i_area*100/areas.len(), *finished))
+                            .send((threadid, year, i_area*100/mca::MCA_SIZE, *finished))
                             .unwrap();
                         break;
                     }
@@ -354,5 +353,5 @@ fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, areas:&Vec<usize>, 
         }
     }
     // step 4: send progress
-    tx_clone.send((threadid, year, i_area*100/areas.len(), 0)).unwrap();
+    tx_clone.send((threadid, year, i_area*100/mca::MCA_SIZE, 0)).unwrap();
 }
