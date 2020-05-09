@@ -8,7 +8,6 @@ use std::sync::{mpsc, Arc, Mutex};
 use md5::{Md5, Digest};
 
 mod mca;
-mod year;
 
 // the data structure of the formula
 struct Pair {
@@ -24,20 +23,23 @@ const COE: [usize; 17] =[7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2];
 const C_SUM: [&str; 11] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "X"];
 
 fn main() {
+    // parse args
+    let mut from_year = 1970;
+    let mut to_year = 2000;
     let mut v_hash: Vec<(String, u64, u32)> = vec![]; // (hash,id,hash_bytes_prefix)
-    if !parse_file(&mut v_hash) {return;}
-
-    println!("Start to decode...");
-    let start = Instant::now();
-    let thread_num = num_cpus::get();
+    if !parse_args(&mut v_hash, &mut from_year, &mut to_year) {return;}
     let v_hash_len = v_hash.len();
 
+    // start
+    println!("Start to decode... [from year {} to {}]", from_year, to_year);
+    let start = Instant::now();
     // set up mutex
     let v_hash_mutex = Arc::new(Mutex::new(v_hash));
     let finished: usize = 0;
     let finished_mutex = Arc::new(Mutex::new(finished));
 
     //create threads
+    let thread_num = num_cpus::get();
     let (tx, rx) = mpsc::channel();
     for threadid in 0..thread_num {
         println!("Thread {} starting...", threadid);
@@ -49,17 +51,21 @@ fn main() {
                 // allow some interval to avoid conflict in accessing mutex
                 thread::sleep(std::time::Duration::from_millis(200 * threadid as u64));
             }
+            // generate helper data structures
+            let v_years = generate_v_years(&from_year, &to_year);
+            let v_strings = generate_v_strings(&from_year, &to_year);
+            let v_sums = generate_v_sums();
             // alloc memory
             let mut v: Vec<Pair> = Vec::with_capacity(SLICE_SIZE);
             unsafe {
                 v.set_len(SLICE_SIZE);
             }
             // each year
-            for year in &year::YEAR {
+            for year in v_years {
                 // each assigned area
                 let mut i_area = threadid * AREA_BATCH_SIZE;
                 while i_area < mca::MCA_SIZE {
-                    thread_work(threadid,&mut v,*year,i_area, &v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
+                    thread_work(threadid,&mut v,&v_strings,&v_sums,year,i_area,&from_year,&v_hash_clone, v_hash_len, &finished_clone, &tx_clone);
                     i_area += thread_num * AREA_BATCH_SIZE;
                     if *finished_clone.lock().unwrap() == v_hash_len {
                         break;
@@ -70,7 +76,7 @@ fn main() {
                 } // check if work done
             }
         });
-    } // end creat threads
+    } // end create threads
     drop(tx);
 
     // recieve progress from threads
@@ -96,7 +102,6 @@ fn main() {
         term.write_str(&format!("Thread {} stoped", i)).unwrap();
         term.move_cursor_down(thread_num - i).unwrap();
     }
-    println!("\nCompleted @{}", start.elapsed().as_secs());
 
     // write result to file
     let args: Vec<String> = env::args().collect();
@@ -113,15 +118,19 @@ fn main() {
 
 }
 
-fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
+fn parse_args(v_hash: &mut Vec<(String, u64, u32)>, from_year: &mut usize, to_year: &mut usize) -> bool {
     // parse file name
     let filename: String;
     let args: Vec<String> = env::args().collect();
     if args.len() == 1 {
-        println!("missing file name");
+        println!("usage: mi hash_filename [from_year] [to_year]");
         return false;
     } else {
         filename = args[1].to_string();
+        if args.len() > 3 {
+            *from_year = args[2].parse::<usize>().unwrap();
+            *to_year = args[3].parse::<usize>().unwrap();
+        }
     }
 
     // process the file and get a md5 hash list
@@ -155,7 +164,7 @@ fn parse_file(v_hash: &mut Vec<(String, u64, u32)>) -> bool {
     true
 }
 
-fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<usize>>, year:usize, i_area:usize) {
+fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<usize>>, year:usize, i_area:usize,from_year:&usize) {
     let mut i: usize = 0;
     let mut id_string = String::from("123456789012345678");
     let mut md5 = Md5::new();
@@ -177,8 +186,8 @@ fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<u
             sum_area_year += (t % 10) * COE[9-i];
             t = t / 10;
         }
-        id_string.replace_range(0..6, &v_strings[0][current_area as usize]);
-        id_string.replace_range(6..10, &v_strings[1][year-1970]);
+        id_string.replace_range(0..6, &v_strings[0][current_area]);
+        id_string.replace_range(6..10, &v_strings[1][year-from_year]);
         let mut area_year_month = area_year;
         for month in 0..DAYS.len() {
             area_year_month += 100000;
@@ -213,13 +222,34 @@ fn generate_ids(v:&mut Vec<Pair>, v_strings:&Vec<Vec<String>>, v_sums:&Vec<Vec<u
     }
 }
 
-fn generate_v_strings() -> Vec<Vec<String>> {
+fn generate_v_years(from_year: &usize, to_year: &usize) -> Vec<usize> {
+    let from_year = *from_year;
+    let to_year = *to_year;
+    let mut v_years = Vec::with_capacity(to_year-from_year+1);
+    let mut first = 1990;
+    if first > to_year {first = to_year;}
+    if first < from_year {first = from_year;}
+    v_years.push(first);
+    let mut delta = 1;
+    while first-delta >= from_year || first+delta <= to_year {
+        if first-delta >= from_year {
+            v_years.push(first-delta);
+        }
+        if first+delta <= to_year {
+            v_years.push(first+delta);
+        }
+        delta+=1;
+    }
+    v_years
+}
+
+fn generate_v_strings(from_year: &usize, to_year: &usize) -> Vec<Vec<String>> {
     let mut v_area = Vec::with_capacity(mca::MCA_SIZE);
     for area in mca::MCA.iter() {
         v_area.push(area.to_string());
     }
-    let mut v_year = Vec::with_capacity(year::YEAR_SIZE);
-    for year in 1970..2001 {
+    let mut v_year = Vec::with_capacity(*to_year-*from_year+1);
+    for year in *from_year..*to_year+1 {
         v_year.push(year.to_string());
     }
     let mut v_100 = Vec::with_capacity(100);
@@ -266,10 +296,11 @@ fn generate_v_sums() -> Vec<Vec<usize>> {
 }
 
 fn generate_id_string(id: u64) -> String {
-    let mut id_string = id.to_string();
+    let id_string = id.to_string();
     let mut sum = 0;
-    for i in 0..id_string.len() {
-        let digit = id_string[i..i+1].parse::<usize>().unwrap();
+    let bytes = id_string.as_bytes();
+    for i in 0..bytes.len() {
+        let digit = (bytes[i] - '0' as u8) as usize;
         sum += digit*COE[i];
     }
     let mut r = sum % 11;
@@ -277,26 +308,23 @@ fn generate_id_string(id: u64) -> String {
     if r > 10 {
         r = r - 11;
     }
-    if r == 10 {
-        id_string += "X";
-    } else {
-        id_string += &r.to_string();
-    }
-    id_string
+    id_string + C_SUM[r]
 }
 
-fn thread_work(threadid:usize, v:&mut Vec<Pair>, year:usize, i_area:usize, 
+fn thread_work(threadid:usize,
+    v:&mut Vec<Pair>,
+    v_strings:&Vec<Vec<String>>,
+    v_sums:&Vec<Vec<usize>>,
+    year:usize,
+    i_area:usize,
+    from_year:&usize,
     v_hash_clone:&Arc<Mutex<Vec<(String, u64, u32)>>>, 
     v_hash_len:usize, 
     finished_clone:&Arc<Mutex<usize>>, 
     tx_clone:&mpsc::Sender<(usize,usize,usize,usize)>) {
 
-    // step 0: generate helper data
-    let v_strings = generate_v_strings();
-    let v_sums = generate_v_sums();
-
     // step 1: generate id list & compute md5
-    generate_ids(v, &v_strings, &v_sums, year, i_area);
+    generate_ids(v, &v_strings, &v_sums, year, i_area, from_year);
     // step 2: sort
     v.sort_unstable_by(|a, b| a.hash.cmp(&b.hash));
     // step 3: look up all hashes
