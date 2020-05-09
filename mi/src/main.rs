@@ -114,7 +114,7 @@ fn main() {
         file.write(format!("{},{}\n", v_hash[i].0, id_string).as_ref()).unwrap();
     }
 
-    println!("Decoded results are in {}.out", filename);
+    println!("\nDecoded results are in {}.out", filename);
 
 }
 
