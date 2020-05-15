@@ -1,5 +1,5 @@
-mm: mm.o md5_hash.o md5.o
-	gcc -o $@ $^
+mm: mm.o decoder.o md5_hash.o md5.o
+	gcc -pthread -o $@ $^
 .c.o:
 	gcc -O3 -c $<
 clean:
