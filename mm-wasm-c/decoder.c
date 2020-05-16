@@ -284,19 +284,22 @@ void decode(MD5_MOBILE* md5_mobile, size_t hash_len, size_t thread_num, size_t t
                     }
                 }
             }
-            pthread_mutex_lock(&mutex);
-            found += count;
-            if (found == hash_len) finished = 1;
-            if (count > 0)
+            if (n1 & 1) // only a half chance to do
             {
-                count = 0;
-                printf("%d/%zu @%lds\n", found, hash_len, time(NULL) - start);
+                pthread_mutex_lock(&mutex);
+                found += count;
+                if (found == hash_len) finished = 1;
+                if (count > 0)
+                {
+                    count = 0;
+                    printf("%d/%zu @%lds\n", found, hash_len, time(NULL) - start);
+                }            
+                pthread_mutex_unlock(&mutex);
+                if (finished)
+                {
+                    goto end;
+                }            
             }            
-            pthread_mutex_unlock(&mutex);
-            if (finished)
-            {
-                goto end;
-            }        
         }
     }
 

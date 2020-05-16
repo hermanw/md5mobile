@@ -1,26 +1,71 @@
 #include "decoder.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
 #include <unistd.h>
 
-int main() {
-    char * s = "69bb4c271c5e41bcd15e082,\
-2a3b1c50ca7037e07cd91d8c995d65f6,\
-2f8908de224321baccc727d2b5ccf763,\
-f395f2ddb25fbeaa9748b307a9359d33,\
-e570c04b9c2393b884606ca6071f000f,\
-d177d9c963eb7b7f7e2a7b22b932f00a , \
-611598cea8bff4759b9ac61f5366779a,\
-8cd49e4a8278cfabb76705493ec3b7ff,\
-3daa2c096dcec3206f95b57d209876e0,\
-7f837752b3acd30a7c70b30245b8aa7d,\
-f22b3b6bee1ad0137a55ac7acdcc6fd0,\
-dce028255fff80eef85c16a01e1f7e2,b145a5e9e8d35b1c5bb886c5686e5b76";
+char* read_from_file(char* filename)
+{
+    FILE * f = fopen (filename, "rb");
+    if (f)
+    {
+        fseek (f, 0, SEEK_END);
+        int len = ftell (f);
+        fseek (f, 0, SEEK_SET);
+        char * buffer = malloc (len + 1);
+        fread (buffer, 1, len, f);
+        fclose (f);
+        buffer[len] = 0;
+        return buffer;
+    }
+    return 0;
+}
 
+void write_to_file (char* filename, MD5_MOBILE* md5_mobile, int hash_len)
+{
+    FILE * f = fopen (filename, "w");
+    for (int h = 0; h <hash_len; h++)
+    {
+        for (size_t i = 0; i < HASH_LEN; i++)
+        {
+            fputc(md5_mobile[h].hash_string[i], f);
+        }
+        fputc(',', f);
+        for (size_t i = 0; i < MOBILE_LEN; i++)
+        {
+            fputc(md5_mobile[h].mh.mobile[i], f);
+        }
+        fputc('\n', f);
+    }
+    fclose (f);
+}
+
+void sort_md5_mobile(MD5_MOBILE** md5_mobile, int hash_len)
+{
+    MD5_MOBILE* temp = calloc(hash_len, sizeof(MD5_MOBILE));
+    for (int i = 0; i < hash_len; i++)
+    {
+        int index = (*md5_mobile)[i].index;
+        temp[index] = (*md5_mobile)[i];
+    }
+    free(*md5_mobile);
+    *md5_mobile = temp;
+}
+
+int main(int argc, char *argv[]) {
+    char *s = NULL;
+    if (argc < 2 || !(s = read_from_file(argv[1])))
+    {
+        printf("usage: mm filename\n");
+        return 0;
+    }
+    
     MD5_MOBILE* md5_mobile = 0;
     int hash_len =  prep_data(s, &md5_mobile);
     printf("find %d hashes\n", hash_len);
+    free(s);
+    s = 0;
 
     int thread_num = sysconf(_SC_NPROCESSORS_ONLN);
     printf("starting %d threads...\n", thread_num);
@@ -40,11 +85,18 @@ dce028255fff80eef85c16a01e1f7e2,b145a5e9e8d35b1c5bb886c5686e5b76";
         pthread_join(threads[i], NULL);
     }
 
-    for (int i = 0; i <hash_len; i++)
-    {
-        print_md5_mobile(md5_mobile+i);
-    }
+    char outfile[strlen(argv[1])+4];
+    strcpy(outfile, argv[1]);
+    strcat(outfile,".out");
+    sort_md5_mobile(&md5_mobile, hash_len);
+    write_to_file(outfile, md5_mobile, hash_len);
+    printf("please find results in file: %s\n", outfile);
+    // for (int i = 0; i <hash_len; i++)
+    // {
+    //     print_md5_mobile(md5_mobile+i);
+    // }
 
     free(md5_mobile);
     md5_mobile = 0;
+    return 0;
 }
