@@ -41,6 +41,40 @@ void write_to_file (char* filename, MD5_MOBILE* md5_mobile, int hash_len)
     fclose (f);
 }
 
+int check_dup(MD5_MOBILE* md5_mobile, int hash_len)
+{
+    int dup = 0;
+    for (int i = 0; i < hash_len; i++)
+    {
+        if(md5_mobile[i].mh.mobile[0] != '1')
+        {
+            if (i>0 && is_equal(&md5_mobile[i].mh,&md5_mobile[i-1].mh))
+            {
+                md5_mobile[i].mh = md5_mobile[i-1].mh;
+                dup++;
+            }
+            else
+            {            
+                int p = i + 1;
+                while(p<hash_len && is_equal(&md5_mobile[i].mh,&md5_mobile[p].mh)) {
+                    if (md5_mobile[p].mh.mobile[0] == '1')
+                    {
+                        md5_mobile[i].mh = md5_mobile[p].mh;
+                        dup++;
+                        break;
+                    }
+                    else
+                    {
+                        p++;
+                    }
+                                        
+                }
+            }
+        }
+    }
+    return dup;
+}
+
 void sort_md5_mobile(MD5_MOBILE** md5_mobile, int hash_len)
 {
     MD5_MOBILE* temp = calloc(hash_len, sizeof(MD5_MOBILE));
@@ -85,10 +119,14 @@ int main(int argc, char *argv[]) {
         pthread_join(threads[i], NULL);
     }
 
+    int found = _found();
+    int dup = check_dup(md5_mobile, hash_len);
+    printf("find %d dup hashes\n", dup);
+    printf("total %d hashes are decode\n", found + dup);
+    sort_md5_mobile(&md5_mobile, hash_len);
     char outfile[strlen(argv[1])+4];
     strcpy(outfile, argv[1]);
     strcat(outfile,".out");
-    sort_md5_mobile(&md5_mobile, hash_len);
     write_to_file(outfile, md5_mobile, hash_len);
     printf("please find results in file: %s\n", outfile);
     // for (int i = 0; i <hash_len; i++)

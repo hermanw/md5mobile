@@ -224,6 +224,8 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 int found = 0;
 time_t start = 0;
 
+inline int _found() {return found;}
+
 void decode(MD5_MOBILE* md5_mobile, size_t hash_len, size_t thread_num, size_t threadid)
 {
     // init decoder
