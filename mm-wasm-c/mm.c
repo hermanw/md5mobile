@@ -114,10 +114,14 @@ int main(int argc, char *argv[]) {
         ti[i].hash_len = hash_len;
         pthread_create(&threads[i], 0, thread_f, (void*) &ti[i]);
     }
+    pthread_t thread_p;
+    pthread_create(&thread_p, 0, thread_printing, (void*)&hash_len);
+
     for (int i = 0; i <thread_num; i++)
     {
         pthread_join(threads[i], NULL);
     }
+    pthread_cancel(thread_p);
 
     int found = _found();
     int dup = check_dup(md5_mobile, hash_len);

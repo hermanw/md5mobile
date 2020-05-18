@@ -24,3 +24,4 @@ int is_equal(const MobileHash *a, const MobileHash *b);
 void print_md5_mobile(MD5_MOBILE* mm);
 size_t prep_data(const char* s, MD5_MOBILE** p);
 void* thread_f(void* p);
+void* thread_printing(void* p);

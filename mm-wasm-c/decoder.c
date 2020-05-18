@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <pthread.h>
 #include <time.h>
+#include <unistd.h>
 
 static const uint8_t ZERO = '0';
 static const uint8_t PREFIX_LIST[] =
@@ -222,7 +223,6 @@ size_t prep_data(const char* s, MD5_MOBILE** p)
 
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 int found = 0;
-time_t start = 0;
 
 inline int _found() {return found;}
 
@@ -241,7 +241,6 @@ void decode(MD5_MOBILE* md5_mobile, size_t hash_len, size_t thread_num, size_t t
     }
     int count = 0;
     int finished = 0;
-    if(!start) {start = time(NULL);}
 
     // each prefix
     for (size_t i = threadid; i < prefix_size; i+=thread_num)
@@ -286,21 +285,14 @@ void decode(MD5_MOBILE* md5_mobile, size_t hash_len, size_t thread_num, size_t t
                     }
                 }
             }
-            if (n1 & 1) // only a half chance to do
+            pthread_mutex_lock(&mutex);
+            found += count;
+            if (found == hash_len) finished = 1;
+            pthread_mutex_unlock(&mutex);
+            count = 0;
+            if (finished)
             {
-                pthread_mutex_lock(&mutex);
-                found += count;
-                if (found == hash_len) finished = 1;
-                if (count > 0)
-                {
-                    count = 0;
-                    printf("%d/%zu @%lds\n", found, hash_len, time(NULL) - start);
-                }            
-                pthread_mutex_unlock(&mutex);
-                if (finished)
-                {
-                    goto end;
-                }            
+                goto end;
             }            
         }
     }
@@ -318,4 +310,15 @@ void* thread_f(void* p)
     THREAD_INFO* ti = (THREAD_INFO*) p;
     decode(ti->md5_mobile, ti->hash_len, ti->thread_num, ti->threadid);
     return 0;
+}
+
+void* thread_printing(void* p)
+{
+    int hash_len = *(int*)p;
+    time_t start = time(NULL);
+    printf("0/%d\n", hash_len);
+    while (1) {
+        sleep(1);
+        printf("\033[1A%d/%d @%lds\n", found, hash_len, time(NULL) - start);
+    }
 }
