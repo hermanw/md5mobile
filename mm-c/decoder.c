@@ -52,7 +52,7 @@ void quick_sort(SortedMobileHash *array, int from, int to)
     quick_sort(array,i+1,to);
 }
 
-int binary_search(SortedMobileHash *array, int len, const MobileHash* key)
+inline int binary_search(SortedMobileHash *array, int len, const MobileHash* key)
 {
     int low = 0, high = len-1, mid;
     while(low <= high)
@@ -229,50 +229,47 @@ void free_decoder()
 
 void decode(size_t thread_num, size_t threadid)
 {
-    MobileHash* mh = alloc_mh();
+    MobileHash *mh = alloc_mh();
+    uint8_t *mobile = mh->mobile;
+    SortedMobileHash *smh = decoder.s_mobile_hash;
+    int dedup_len = decoder.dedup_len;
+    int count = 0;
 
     // each prefix
     for (size_t i = threadid; i < PREFIX_SIZE; i+=thread_num)
     {
-        memcpy(mh->mobile, decoder.prefix_bytes+i, 3);
+        memcpy(mobile, decoder.prefix_bytes+i, 3);
         // each number
         for (uint8_t n1 = 0; n1 < 10; n1++)
         {
-            mh->mobile[3] = n1 + ZERO;
+            mobile[3] = n1 + ZERO;
             for (uint8_t n2 = 0; n2 < 10; n2++)
             {
-                mh->mobile[4] = n2 + ZERO;
+                mobile[4] = n2 + ZERO;
                 for (uint8_t n3 = 0; n3 < 10; n3++)
                 {
-                    mh->mobile[5] = n3 + ZERO;
+                    mobile[5] = n3 + ZERO;
                     for (uint8_t n4 = 0; n4 < 10; n4++)
                     {
-                        mh->mobile[6] = n4 + ZERO;
+                        mobile[6] = n4 + ZERO;
                         for (uint8_t n5 = 0; n5 < 10; n5++)
                         {
-                            mh->mobile[7] = n5 + ZERO;
+                            mobile[7] = n5 + ZERO;
                             for (uint8_t n6 = 0; n6 < 10; n6++)
                             {
-                                mh->mobile[8] = n6 + ZERO;
+                                mobile[8] = n6 + ZERO;
                                 for (uint8_t n7 = 0; n7 < 10; n7++)
                                 {
-                                    mh->mobile[9] = n7 + ZERO;
+                                    mobile[9] = n7 + ZERO;
                                     for (uint8_t n8 = 0; n8 < 10; n8++)
                                     {
-                                        mh->mobile[10] = n8 + ZERO;
+                                        mobile[10] = n8 + ZERO;
                                         md5_hash(mh);                                        
-                                        int index = binary_search(decoder.s_mobile_hash, decoder.dedup_len, mh);
+                                        int index = binary_search(smh, dedup_len, mh);
                                         if (index >= 0)
                                         {
-                                            decoder.s_mobile_hash[index].mobile_hash = *mh;
-                                            pthread_mutex_lock(&mutex);
-                                            decoder.count++;
-                                            int finished = (decoder.count == decoder.dedup_len);
-                                            pthread_mutex_unlock(&mutex);
-                                            if(finished)
-                                            {
-                                                goto end;
-                                            }
+                                            smh[index].mobile_hash = *mh;
+                                            count++;
                                         }                                              
                                     }
                                 }
@@ -280,6 +277,15 @@ void decode(size_t thread_num, size_t threadid)
                         }
                     }
                 }
+            }
+            pthread_mutex_lock(&mutex);
+            decoder.count += count;
+            int finished = (decoder.count == dedup_len);
+            pthread_mutex_unlock(&mutex);
+            count = 0;
+            if(finished)
+            {
+                goto end;
             }
         }
     }
