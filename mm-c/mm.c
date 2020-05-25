@@ -14,7 +14,7 @@ char* read_from_file(char* filename)
         int len = ftell (f);
         fseek (f, 0, SEEK_SET);
         char * buffer = malloc (len + 1);
-        fread (buffer, 1, len, f);
+        len = fread (buffer, 1, len, f);
         fclose (f);
         buffer[len] = 0;
         return buffer;
@@ -77,7 +77,7 @@ int main(int argc, char *argv[]) {
     }
     pthread_cancel(thread_p);
 
-    printf("total %zu hashes are decode\n", decoder->count);
+    printf("total %zu hashes are decoded\n", decoder->count);
     resort_mobile_hash();
     char outfile[strlen(argv[1])+4];
     strcpy(outfile, argv[1]);
