@@ -432,7 +432,7 @@ int main(int argc, char* argv[])
     char* p_numbers = (char *)malloc(10000 * 5);
     for (size_t i = 0; i < 10000; i++)
     {
-        sprintf(p_numbers+i*5, "%04d", i);
+        sprintf(p_numbers+i*5, "%04zu", i);
     }
 
     // allocate device memory
@@ -480,7 +480,6 @@ int main(int argc, char* argv[])
             decoder.s_mobile_hash,
             0, nullptr, nullptr));
 
-        // compute << <blocks, threads >> > (d_smh, decoder.dedup_len, prefix[0], prefix[1], prefix[2], d_p_numbers);
         decoder.count = 0;
         for (size_t h = 0; h < decoder.dedup_len; h++)
         {
@@ -489,7 +488,7 @@ int main(int argc, char* argv[])
                 decoder.count++;
             }
         }
-        printf("\033[1A%lu%% @%lds - %zu/%zu\n", (i+1)*100/ PREFIX_SIZE, time(NULL) - start, decoder.count, decoder.dedup_len);
+        printf("\033[1A%zu/%zu @%lds - searching %lu%%...\n", decoder.count, decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
         if (decoder.count == decoder.dedup_len)
         {
             break;

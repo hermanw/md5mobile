@@ -22,56 +22,35 @@ typedef struct
     MobileHash mobile_hash;
 } SortedMobileHash;
 
-int is_equal(__global const MobileHash* a, const MobileHash* b)
+int compare_hash(__global const uint32_t* a, const uint32_t* b)
 {
-    if (a->hash[0] == b->hash[0]
-        && a->hash[1] == b->hash[1]
-        && a->hash[2] == b->hash[2]
-        && a->hash[3] == b->hash[3])
-        return 1;
-
-    return 0;
-}
-
-int is_lesser(__global const MobileHash* a, const MobileHash* b)
-{
-    if (a->hash[0] < b->hash[0])
+    for (int i = 0; i < STATE_LEN; i++)
     {
-        return 1;
-    }
-    else if (a->hash[0] == b->hash[0]) {
-        if (a->hash[1] < b->hash[1])
+        if (a[i] < b[i])
+        {
+            return -1;
+        }
+        else if (a[i] > b[i])
         {
             return 1;
-        }
-        else if (a->hash[1] == b->hash[1]) {
-            if (a->hash[2] < b->hash[2])
-            {
-                return 1;
-            }
-            else if (a->hash[2] == b->hash[2]) {
-                if (a->hash[3] < b->hash[3])
-                {
-                    return 1;
-                }
-            }
-        }
+        }        
     }
 
     return 0;
 }
 
-int binary_search(__global SortedMobileHash* array, int len, const MobileHash* key)
+int binary_search(__global SortedMobileHash* array, int len, const uint32_t* hash)
 {
     int low = 0, high = len - 1, mid;
     while (low <= high)
     {
         mid = (low + high) / 2;
-        if (is_equal(&array[mid].mobile_hash, key))
+        int r = compare_hash(array[mid].mobile_hash.hash, hash);
+        if (r == 0)
         {
             return mid;
         }
-        else if (is_lesser(&array[mid].mobile_hash, key))
+        else if (r < 0)
         {
             low = mid + 1;
         }
@@ -206,7 +185,7 @@ __kernel void compute(__global SortedMobileHash* smh,
         mh.hash[3] = 0x10325476UL;
         md5_compress(mh.hash, mh.mobile);
 
-        int index = binary_search(smh, dedup_len, &mh);
+        int index = binary_search(smh, dedup_len, mh.hash);
         if (index >= 0)
         {
             smh[index].mobile_hash = mh;
