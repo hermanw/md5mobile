@@ -1,28 +1,31 @@
 #define SLICE_LEN 100000000
-#define MOBILE_LEN 11
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
-#define LENGTH_SIZE 8 // In bytes
-#define HASH_LEN 32
 
-typedef unsigned long size_t;
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 
 typedef struct
 {
-    uint8_t mobile[BLOCK_LEN];
+    uint8_t data[BLOCK_LEN];
     uint32_t hash[STATE_LEN];
-} MobileHash;
+} DataHash;
 
 typedef struct
 {
     int index;
     int index_dup;
-    MobileHash mobile_hash;
-} SortedMobileHash;
+    DataHash data_hash;
+} SortedDataHash;
 
-int compare_hash(__global const uint32_t* a, const uint32_t* b)
+typedef struct
+{
+    int type;
+    int len;
+    DataHash data_hash;
+} InputData;
+
+static int compare_hash(__global const uint32_t* a, const uint32_t* b)
 {
     for (int i = 0; i < STATE_LEN; i++)
     {
@@ -39,13 +42,13 @@ int compare_hash(__global const uint32_t* a, const uint32_t* b)
     return 0;
 }
 
-int binary_search(__global SortedMobileHash* array, int len, const uint32_t* hash)
+static int binary_search(__global SortedDataHash* array, int len, const uint32_t* hash)
 {
     int low = 0, high = len - 1, mid;
     while (low <= high)
     {
         mid = (low + high) / 2;
-        int r = compare_hash(array[mid].mobile_hash.hash, hash);
+        int r = compare_hash(array[mid].data_hash.hash, hash);
         if (r == 0)
         {
             return mid;
@@ -62,7 +65,7 @@ int binary_search(__global SortedMobileHash* array, int len, const uint32_t* has
     return -1;
 }
 
-void md5_compress(uint32_t state[4], const uint8_t block[64])
+static void md5_compress(uint32_t state[4], const uint8_t block[64])
 {
     unsigned int schedule[16];
     schedule[0] = (unsigned int)block[0 * 4 + 0] << 0 | (unsigned int)block[0 * 4 + 1] << 8 | (unsigned int)block[0 * 4 + 2] << 16 | (unsigned int)block[0 * 4 + 3] << 24;
@@ -158,37 +161,39 @@ void md5_compress(uint32_t state[4], const uint8_t block[64])
     state[3] = 0U + state[3] + d;
 }
 
-__kernel void compute(__global SortedMobileHash* smh,
-    __global char* p_numbers,
-    int dedup_len, 
-    uint8_t prefix0, 
-    uint8_t prefix1, 
-    uint8_t prefix2)
+__kernel void compute(__global SortedDataHash* sdh, __global InputData* in_data, uint8_t prefix)
 {
-	const int i = get_global_id (0);
+	const size_t i = get_global_id (0);
 
 	if (i < SLICE_LEN)
     {
-        MobileHash mh;
-        memset(mh.mobile, 0, BLOCK_LEN);
-        mh.mobile[0] = prefix0;
-        mh.mobile[1] = prefix1;
-        mh.mobile[2] = prefix2;
-        memcpy(mh.mobile + 3, p_numbers + (i/10000) * 5, 4);
-        memcpy(mh.mobile + 7, p_numbers + (i % 10000) * 5, 4);
-        mh.mobile[MOBILE_LEN] = 0x80;
-        mh.mobile[BLOCK_LEN - LENGTH_SIZE] = 'X';
+        DataHash dh;
+        dh = in_data->data_hash;
 
-        mh.hash[0] = 0x67452301UL;
-        mh.hash[1] = 0xEFCDAB89UL;
-        mh.hash[2] = 0x98BADCFEUL;
-        mh.hash[3] = 0x10325476UL;
-        md5_compress(mh.hash, mh.mobile);
+        // fill mobile digits
+        dh.data[0] = prefix / 100 + '0';
+        dh.data[1] = (prefix % 100) / 10 + '0';
+        dh.data[2] = prefix % 10 + '0';
+        size_t n = i;
+        for(int j = 7; j >= 0; j--)
+        {
+            if(n == 0)
+            {
+                dh.data[3+j] = '0';
+            }
+            else
+            {
+                dh.data[3+j] = n % 10 + '0';
+                n /= 10;
+            }
+        }
 
-        int index = binary_search(smh, dedup_len, mh.hash);
+        md5_compress(dh.hash, dh.data);
+
+        int index = binary_search(sdh, in_data->len, dh.hash);
         if (index >= 0)
         {
-            smh[index].mobile_hash = mh;
+            sdh[index].data_hash = dh;
         }
     }
 }

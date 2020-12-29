@@ -21,24 +21,34 @@
 
 typedef struct
 {
-    uint8_t mobile[BLOCK_LEN];
+    uint8_t data[BLOCK_LEN];
     uint32_t hash[STATE_LEN];
-} MobileHash;
+} DataHash;
 
 typedef struct
 {
     int index;
     int index_dup;
-    MobileHash mobile_hash;
-} SortedMobileHash;
+    DataHash data_hash;
+} SortedDataHash;
+
+typedef struct
+{
+    int type;
+    int len;
+    DataHash data_hash;
+} InputData;
+
+#define DATA_TYPE_MOBILE 0
+#define DATA_TYPE_CNID 1
 
 typedef char HashString[HASH_LEN];
 typedef struct
 {
     HashString* hash_string;
     size_t hash_len;
-    MobileHash* mobile_hash;
-    SortedMobileHash* s_mobile_hash;
+    DataHash* data_hash;
+    SortedDataHash* s_data_hash;
     size_t dedup_len;
     size_t count;
 } Decoder;
@@ -65,8 +75,6 @@ static const size_t PREFIX_SIZE = sizeof(PREFIX_LIST) / sizeof(PREFIX_LIST[0]);
 cl_context context;
 cl_program program;
 cl_kernel kernel;
-cl_mem aBuffer;
-cl_mem bBuffer;
 cl_device_id device_id;
 cl_command_queue queue;
 
@@ -99,60 +107,38 @@ void write_to_file(char* filename, Decoder* decoder)
         fputc(',', f);
         for (size_t i = 0; i < MOBILE_LEN; i++)
         {
-            fputc(decoder->mobile_hash[h].mobile[i], f);
+            fputc(decoder->data_hash[h].data[i], f);
         }
         fputc('\n', f);
     }
     fclose(f);
 }
 
-int is_equal(const MobileHash* a, const MobileHash* b)
+int compare_hash(const uint32_t* a, const uint32_t* b)
 {
-    if (a->hash[0] == b->hash[0]
-        && a->hash[1] == b->hash[1]
-        && a->hash[2] == b->hash[2]
-        && a->hash[3] == b->hash[3])
-        return 1;
-
-    return 0;
-}
-
-int is_lesser(const MobileHash* a, const MobileHash* b)
-{
-    if (a->hash[0] < b->hash[0])
+    for (int i = 0; i < STATE_LEN; i++)
     {
-        return 1;
-    }
-    else if (a->hash[0] == b->hash[0]) {
-        if (a->hash[1] < b->hash[1])
+        if (a[i] < b[i])
+        {
+            return -1;
+        }
+        else if (a[i] > b[i])
         {
             return 1;
-        }
-        else if (a->hash[1] == b->hash[1]) {
-            if (a->hash[2] < b->hash[2])
-            {
-                return 1;
-            }
-            else if (a->hash[2] == b->hash[2]) {
-                if (a->hash[3] < b->hash[3])
-                {
-                    return 1;
-                }
-            }
-        }
+        }        
     }
 
     return 0;
 }
 
-void quick_sort(SortedMobileHash* array, int from, int to)
+void quick_sort(SortedDataHash* array, int from, int to)
 {
     if (from >= to)return;
-    SortedMobileHash temp;
+    SortedDataHash temp;
     int i = from, j;
     for (j = from + 1; j <= to; j++)
     {
-        if (is_lesser(&array[j].mobile_hash, &array[from].mobile_hash))
+        if (compare_hash(array[j].data_hash.hash, array[from].data_hash.hash) < 0)
         {
             i = i + 1;
             temp = array[i];
@@ -180,21 +166,21 @@ void hex_to_bytes(uint8_t* to, char* from, int len)
     }
 }
 
-void print_mobile_hash(MobileHash* mh) {
+void print_data_hash(DataHash* dh) {
     for (size_t i = 0; i < STATE_LEN; i++)
     {
-        printf("%x-", mh->hash[i]);
+        printf("%x-", dh->hash[i]);
     }
     printf(",");
     for (size_t i = 0; i < MOBILE_LEN; i++)
     {
-        printf("%c", mh->mobile[i]);
+        printf("%c", dh->data[i]);
     }
     printf("\n");
 }
-void print_sorted_mobile_hash(SortedMobileHash* smh) {
-    printf("%d,%d,", smh->index, smh->index_dup);
-    print_mobile_hash(&smh->mobile_hash);
+void print_sorted_data_hash(SortedDataHash* sdh) {
+    printf("%d,%d,", sdh->index, sdh->index_dup);
+    print_data_hash(&sdh->data_hash);
 }
 
 size_t validate_hash_string(const char* s)
@@ -227,7 +213,7 @@ size_t validate_hash_string(const char* s)
 
 void parse_hash_strings(Decoder& decoder, const char* s)
 {
-    SortedMobileHash* p_smh = decoder.s_mobile_hash;
+    SortedDataHash* p_sdh = decoder.s_data_hash;
     HashString* p_hs = decoder.hash_string;
 
     int valid_char_num = 0;
@@ -240,10 +226,10 @@ void parse_hash_strings(Decoder& decoder, const char* s)
             if (valid_char_num == HASH_LEN)
             {
                 memcpy(p_hs, hash_string, HASH_LEN);
-                hex_to_bytes((uint8_t*)p_smh->mobile_hash.hash, hash_string, HASH_LEN);
-                p_smh->index = count;
+                hex_to_bytes((uint8_t*)p_sdh->data_hash.hash, hash_string, HASH_LEN);
+                p_sdh->index = count;
                 count++;
-                p_smh++;
+                p_sdh++;
                 p_hs++;
             }
             valid_char_num = 0;
@@ -258,25 +244,25 @@ void parse_hash_strings(Decoder& decoder, const char* s)
     if (valid_char_num == HASH_LEN)
     {
         memcpy(p_hs, hash_string, HASH_LEN);
-        hex_to_bytes((uint8_t*)p_smh->mobile_hash.hash, hash_string, HASH_LEN);
-        p_smh->index = count;
+        hex_to_bytes((uint8_t*)p_sdh->data_hash.hash, hash_string, HASH_LEN);
+        p_sdh->index = count;
     }
 }
 
-void dedup_sorted_mobile_hash(Decoder& decoder)
+void dedup_sorted_data_hash(Decoder& decoder)
 {
     decoder.dedup_len = decoder.hash_len;
     for (size_t i = 1; i < decoder.dedup_len; i++)
     {
-        if (is_equal(&decoder.s_mobile_hash[i].mobile_hash, &decoder.s_mobile_hash[i - 1].mobile_hash))
+        if (compare_hash(decoder.s_data_hash[i].data_hash.hash, decoder.s_data_hash[i - 1].data_hash.hash) == 0)
         {
-            SortedMobileHash temp = decoder.s_mobile_hash[i];
-            temp.index_dup = decoder.s_mobile_hash[i - 1].index;
+            SortedDataHash temp = decoder.s_data_hash[i];
+            temp.index_dup = decoder.s_data_hash[i - 1].index;
             for (size_t j = i; j < decoder.hash_len - 1; j++)
             {
-                decoder.s_mobile_hash[j] = decoder.s_mobile_hash[j + 1];
+                decoder.s_data_hash[j] = decoder.s_data_hash[j + 1];
             }
-            decoder.s_mobile_hash[decoder.hash_len - 1] = temp;
+            decoder.s_data_hash[decoder.hash_len - 1] = temp;
             decoder.dedup_len--;
             i--;
         }
@@ -284,20 +270,20 @@ void dedup_sorted_mobile_hash(Decoder& decoder)
 }
 
 
-void resort_mobile_hash(Decoder& decoder)
+void resort_data_hash(Decoder& decoder)
 {
     for (int i = 0; i < decoder.hash_len; i++)
     {
         if (i < decoder.dedup_len)
         {
-            int index = decoder.s_mobile_hash[i].index;
-            decoder.mobile_hash[index] = decoder.s_mobile_hash[i].mobile_hash;
+            int index = decoder.s_data_hash[i].index;
+            decoder.data_hash[index] = decoder.s_data_hash[i].data_hash;
         }
         else
         {
-            int index = decoder.s_mobile_hash[i].index;
-            int index_dup = decoder.s_mobile_hash[i].index_dup;
-            decoder.mobile_hash[index] = decoder.mobile_hash[index_dup];
+            int index = decoder.s_data_hash[i].index;
+            int index_dup = decoder.s_data_hash[i].index_dup;
+            decoder.data_hash[index] = decoder.data_hash[index_dup];
         }
     }
 }
@@ -306,26 +292,26 @@ void init_decoder(Decoder& decoder,const char* s)
 {
     decoder.hash_len = validate_hash_string(s);
     decoder.hash_string = (HashString*)calloc(decoder.hash_len, sizeof(HashString));
-    decoder.mobile_hash = (MobileHash*)calloc(decoder.hash_len, sizeof(MobileHash));
-    decoder.s_mobile_hash = (SortedMobileHash*)calloc(decoder.hash_len, sizeof(SortedMobileHash));
+    decoder.data_hash = (DataHash*)calloc(decoder.hash_len, sizeof(DataHash));
+    decoder.s_data_hash = (SortedDataHash*)calloc(decoder.hash_len, sizeof(SortedDataHash));
     decoder.count = 0;
     parse_hash_strings(decoder, s);
-    quick_sort(decoder.s_mobile_hash, 0, decoder.hash_len - 1);
-    dedup_sorted_mobile_hash(decoder);
+    quick_sort(decoder.s_data_hash, 0, decoder.hash_len - 1);
+    dedup_sorted_data_hash(decoder);
     // for (size_t i = 0; i < decoder.hash_len; i++)
     // {
     //     printf("%zu,", i);
-    //     print_sorted_mobile_hash(decoder.s_mobile_hash+i);
+    //     print_sorted_data_hash(decoder.s_data_hash+i);
     // }
 }
 void free_decoder(Decoder& decoder)
 {
     free(decoder.hash_string);
     decoder.hash_string = 0;
-    free(decoder.mobile_hash);
-    decoder.mobile_hash = 0;
-    free(decoder.s_mobile_hash);
-    decoder.s_mobile_hash = 0;
+    free(decoder.data_hash);
+    decoder.data_hash = 0;
+    free(decoder.s_data_hash);
+    decoder.s_data_hash = 0;
 }
 
 void _CheckCLError (cl_int error, int line)
@@ -395,8 +381,6 @@ int init_opencl()
 }
 void release_opencl() {	
 	clReleaseCommandQueue (queue);
-	clReleaseMemObject (aBuffer);
-	clReleaseMemObject (bBuffer);
 	clReleaseKernel (kernel);
 	clReleaseProgram (program);
 	clReleaseContext (context);
@@ -416,7 +400,7 @@ int main(int argc, char* argv[])
     char* s = NULL;
     if (argc < 2 || !(s = read_from_file(argv[1])))
     {
-        printf("mobile md5 decoder [opencl], v1.0, by herman\n");
+        printf("data md5 decoder [opencl], v1.0, by herman\n");
         printf("usage: mm filename\n");
         return 1;
     }
@@ -428,45 +412,37 @@ int main(int argc, char* argv[])
     printf("find %zu hashes\n", decoder.hash_len);
     printf("they have %zu duplicated, %zu unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
 
-    // compute helper strings
-    char* p_numbers = (char *)malloc(10000 * 5);
-    for (size_t i = 0; i < 10000; i++)
-    {
-        sprintf(p_numbers+i*5, "%04zu", i);
-    }
+    // init input data
+    InputData in_data;
+    in_data.type = DATA_TYPE_MOBILE;
+    in_data.len = decoder.dedup_len;
+    memset(in_data.data_hash.data, 0, BLOCK_LEN);
+    in_data.data_hash.data[MOBILE_LEN] = 0x80;
+    in_data.data_hash.data[BLOCK_LEN - LENGTH_SIZE] = 'X';
+    in_data.data_hash.hash[0] = 0x67452301UL;
+    in_data.data_hash.hash[1] = 0xEFCDAB89UL;
+    in_data.data_hash.hash[2] = 0x98BADCFEUL;
+    in_data.data_hash.hash[3] = 0x10325476UL;
 
     // allocate device memory
-    size_t smh_len = decoder.dedup_len * sizeof(SortedMobileHash);
+    size_t sdh_len = decoder.dedup_len * sizeof(SortedDataHash);
     cl_int error = CL_SUCCESS;
-    aBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-		smh_len,
-		decoder.s_mobile_hash, &error);
+    cl_mem aBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+		sdh_len,
+		decoder.s_data_hash, &error);
 	CheckCLError (error);
-    bBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-		10000 * 5,
-		p_numbers, &error);
-	CheckCLError (error);
-
-    // release host memory
-    free(p_numbers);
-
-    // set kernel arg
     clSetKernelArg (kernel, 0, sizeof (cl_mem), &aBuffer);
+    cl_mem bBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+        sizeof(InputData),
+        &in_data, &error);
+    CheckCLError (error);
     clSetKernelArg (kernel, 1, sizeof (cl_mem), &bBuffer);
-    clSetKernelArg (kernel, 2, sizeof (int), &decoder.dedup_len);
 
     printf("0%% @%lds - 0/%zu\n", time(NULL) - start, decoder.dedup_len);
     // work on each prefix
     for (size_t i = 0; i < PREFIX_SIZE; i++)
     {
-        uint8_t prefix0 = PREFIX_LIST[i] / 100 + '0';
-        uint8_t prefix1 = (PREFIX_LIST[i] % 100) / 10 + '0';
-        uint8_t prefix2 = PREFIX_LIST[i] % 10 + '0';
-
-        // set kernel arg
-        clSetKernelArg (kernel, 3, sizeof (uint8_t), &prefix0);
-        clSetKernelArg (kernel, 4, sizeof (uint8_t), &prefix1);
-        clSetKernelArg (kernel, 5, sizeof (uint8_t), &prefix2);
+        clSetKernelArg (kernel, 2, sizeof (uint8_t), PREFIX_LIST+i);
         // call opencl
         const size_t globalWorkSize [] = { SLICE_LEN, 0, 0 };
 	    CheckCLError (clEnqueueNDRangeKernel (queue, kernel, 1,
@@ -476,14 +452,14 @@ int main(int argc, char* argv[])
             0, nullptr, nullptr));
 
         CheckCLError (clEnqueueReadBuffer (queue, aBuffer, CL_TRUE, 0,
-            smh_len,
-            decoder.s_mobile_hash,
+            sdh_len,
+            decoder.s_data_hash,
             0, nullptr, nullptr));
 
         decoder.count = 0;
         for (size_t h = 0; h < decoder.dedup_len; h++)
         {
-            if (decoder.s_mobile_hash[h].mobile_hash.mobile[0])
+            if (decoder.s_data_hash[h].data_hash.data[0])
             {
                 decoder.count++;
             }
@@ -495,9 +471,12 @@ int main(int argc, char* argv[])
         }
     }
 
+	clReleaseMemObject (aBuffer);
+	clReleaseMemObject (bBuffer);
+
     // write reults
     printf("total %zu hashes are decoded\n", decoder.count);
-    resort_mobile_hash(decoder);
+    resort_data_hash(decoder);
     size_t fn_len = strlen(argv[1]) + 5;
     char* outfile = (char*)malloc(fn_len);
     strcpy(outfile, argv[1]);
