@@ -32,13 +32,6 @@ typedef struct
     DataHash data_hash;
 } SortedDataHash;
 
-typedef struct
-{
-    int type;
-    int len;
-    DataHash data_hash;
-} InputData;
-
 #define DATA_TYPE_MOBILE 0
 #define DATA_TYPE_CNID 1
 
@@ -412,18 +405,6 @@ int main(int argc, char* argv[])
     printf("find %zu hashes\n", decoder.hash_len);
     printf("they have %zu duplicated, %zu unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
 
-    // init input data
-    InputData in_data;
-    in_data.type = DATA_TYPE_MOBILE;
-    in_data.len = decoder.dedup_len;
-    memset(in_data.data_hash.data, 0, BLOCK_LEN);
-    in_data.data_hash.data[MOBILE_LEN] = 0x80;
-    in_data.data_hash.data[BLOCK_LEN - LENGTH_SIZE] = 'X';
-    in_data.data_hash.hash[0] = 0x67452301UL;
-    in_data.data_hash.hash[1] = 0xEFCDAB89UL;
-    in_data.data_hash.hash[2] = 0x98BADCFEUL;
-    in_data.data_hash.hash[3] = 0x10325476UL;
-
     // allocate device memory
     size_t sdh_len = decoder.dedup_len * sizeof(SortedDataHash);
     cl_int error = CL_SUCCESS;
@@ -432,17 +413,20 @@ int main(int argc, char* argv[])
 		decoder.s_data_hash, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 0, sizeof (cl_mem), &aBuffer);
-    cl_mem bBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-        sizeof(InputData),
-        &in_data, &error);
-    CheckCLError (error);
-    clSetKernelArg (kernel, 1, sizeof (cl_mem), &bBuffer);
 
     printf("0%% @%lds - 0/%zu\n", time(NULL) - start, decoder.dedup_len);
     // work on each prefix
+    int type = DATA_TYPE_MOBILE;
+    int len = decoder.dedup_len;
     for (size_t i = 0; i < PREFIX_SIZE; i++)
     {
-        clSetKernelArg (kernel, 2, sizeof (uint8_t), PREFIX_LIST+i);
+        cl_uchar4 param1;
+        param1.s[0] = PREFIX_LIST[i] / 100 + '0';
+        param1.s[1] = (PREFIX_LIST[i] % 100) / 10 + '0';
+        param1.s[2] = PREFIX_LIST[i] % 10 + '0';
+        clSetKernelArg (kernel, 1, sizeof (int), &type);
+        clSetKernelArg (kernel, 2, sizeof (int), &len);
+        clSetKernelArg (kernel, 3, sizeof (cl_uchar4), &param1);
         // call opencl
         const size_t globalWorkSize [] = { SLICE_LEN, 0, 0 };
 	    CheckCLError (clEnqueueNDRangeKernel (queue, kernel, 1,
@@ -472,7 +456,6 @@ int main(int argc, char* argv[])
     }
 
 	clReleaseMemObject (aBuffer);
-	clReleaseMemObject (bBuffer);
 
     // write reults
     printf("total %zu hashes are decoded\n", decoder.count);

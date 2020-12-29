@@ -1,9 +1,13 @@
 static const char *const compute_cl = R"(
-#define SLICE_LEN 100000000
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
+#define LENGTH_SIZE 8 // In bytes
+#define MOBILE_LEN 11
+#define SLICE_LEN 100000000
 
-// typedef unsigned long size_t;
+#define DATA_TYPE_MOBILE 0
+#define DATA_TYPE_CNID 1
+
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 
@@ -19,13 +23,6 @@ typedef struct
     int index_dup;
     DataHash data_hash;
 } SortedDataHash;
-
-typedef struct
-{
-    int type;
-    int len;
-    DataHash data_hash;
-} InputData;
 
 static int compare_hash(__global const uint32_t* a, const uint32_t* b)
 {
@@ -163,41 +160,51 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
     state[3] = 0U + state[3] + d;
 }
 
-__kernel void compute(__global SortedDataHash* sdh, __global InputData* in_data, uint8_t prefix)
+__kernel void compute(__global SortedDataHash* sdh, int type, int len, uchar4 param1)
 {
 	const size_t i = get_global_id (0);
 
 	if (i < SLICE_LEN)
     {
-        DataHash dh;
-        dh = in_data->data_hash;
+        uint8_t data[BLOCK_LEN]= {0};
+        uint32_t hash[STATE_LEN] = {0x67452301UL, 0xEFCDAB89UL, 0x98BADCFEUL, 0x10325476UL};
 
-        // fill mobile digits
-        dh.data[0] = prefix / 100 + '0';
-        dh.data[1] = (prefix % 100) / 10 + '0';
-        dh.data[2] = prefix % 10 + '0';
-        size_t n = i;
-        for(int j = 7; j >= 0; j--)
+        if(type == DATA_TYPE_MOBILE)
         {
-            if(n == 0)
+            // fill mobile digits
+            data[MOBILE_LEN] = 0x80;
+            data[BLOCK_LEN - LENGTH_SIZE] = 'X';
+            data[0] = param1[0];
+            data[1] = param1[1];
+            data[2] = param1[2];
+            size_t n = i;
+            for(int j = 7; j >= 0; j--)
             {
-                dh.data[3+j] = '0';
-            }
-            else
-            {
-                dh.data[3+j] = n % 10 + '0';
-                n /= 10;
+                if(n == 0)
+                {
+                    data[3+j] = '0';
+                }
+                else
+                {
+                    data[3+j] = n % 10 + '0';
+                    n /= 10;
+                }
             }
         }
 
-        md5_compress(dh.hash, dh.data);
+        md5_compress(hash, data);
 
-        int index = binary_search(sdh, in_data->len, dh.hash);
+        int index = binary_search(sdh, len, hash);
         if (index >= 0)
         {
-            sdh[index].data_hash = dh;
+            if(type == DATA_TYPE_MOBILE)
+            {
+                for(int j = 0; j < MOBILE_LEN; j++)
+                {
+                    sdh[index].data_hash.data[j] = data[j];
+                }
+            }
         }
     }
 }
-
 )";
