@@ -12,7 +12,6 @@
 
 #include "mm.h"
 
-#define SLICE_LEN 100000000
 #define MOBILE_LEN 11
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
@@ -281,7 +280,7 @@ void resort_data_hash(Decoder& decoder)
     }
 }
 
-void init_decoder(Decoder& decoder,const char* s)
+void init_decoder(Decoder& decoder, const char* s)
 {
     decoder.hash_len = validate_hash_string(s);
     decoder.hash_string = (HashString*)calloc(decoder.hash_len, sizeof(HashString));
@@ -342,7 +341,14 @@ int init_opencl()
 	clGetDeviceIDs (platformIds [0], CL_DEVICE_TYPE_ALL, deviceIdCount,
 		deviceIds, nullptr);
 
+    // use default device
     device_id = deviceIds[1];
+    size_t size = 0;
+    clGetDeviceInfo (device_id, CL_DEVICE_NAME, 0, nullptr, &size);
+    char *name = (char *)malloc(sizeof(char) * size);
+    clGetDeviceInfo (device_id, CL_DEVICE_NAME, size, name, nullptr);
+    printf("decode using %s\n", name);
+    free(name);
 
 	const cl_context_properties contextProperties [] =
 	{
@@ -381,19 +387,11 @@ void release_opencl() {
 
 int main(int argc, char* argv[])
 {
-    time_t start = time(NULL);
-
-    // setup OpenCL
-    if(init_opencl())
-    {
-        exit(1);
-    }
-
     // process hash file
     char* s = NULL;
     if (argc < 2 || !(s = read_from_file(argv[1])))
     {
-        printf("data md5 decoder [opencl], v1.0, by herman\n");
+        printf("md5 decoder [opencl], v1.0, by herman\n");
         printf("usage: mm filename\n");
         return 1;
     }
@@ -405,57 +403,83 @@ int main(int argc, char* argv[])
     printf("find %zu hashes\n", decoder.hash_len);
     printf("they have %zu duplicated, %zu unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
 
-    // allocate device memory
+    // setup OpenCL
+    if(init_opencl())
+    {
+        exit(1);
+    }
+
+    // buffer0 for hash
     size_t sdh_len = decoder.dedup_len * sizeof(SortedDataHash);
     cl_int error = CL_SUCCESS;
-    cl_mem aBuffer = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+    cl_mem buffer0 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
 		sdh_len,
 		decoder.s_data_hash, &error);
 	CheckCLError (error);
-    clSetKernelArg (kernel, 0, sizeof (cl_mem), &aBuffer);
+    clSetKernelArg (kernel, 0, sizeof (cl_mem), &buffer0);
 
-    printf("0%% @%lds - 0/%zu\n", time(NULL) - start, decoder.dedup_len);
+    // buffer1 for number helper strings
+    char* p_numbers = (char *)malloc(10000 * 5);
+    for (size_t i = 0; i < 10000; i++)
+    {
+        sprintf(p_numbers+i*5, "%04zu", i);
+    }
+    cl_mem buffer1 = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+		10000 * 5,
+		p_numbers, &error);
+	CheckCLError (error);
+    clSetKernelArg (kernel, 1, sizeof (cl_mem), &buffer1);
+    free(p_numbers);
+
+    // buffer2 for progress
+    cl_mem buffer2 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+		sizeof (size_t),
+		&decoder.count, &error);
+	CheckCLError (error);
+    clSetKernelArg (kernel, 2, sizeof (cl_mem), &buffer2);
+
     // work on each prefix
+    time_t start = time(NULL);
+    printf("0%% @%lds - 0/%zu\n", time(NULL) - start, decoder.dedup_len);
     int type = DATA_TYPE_MOBILE;
-    int len = decoder.dedup_len;
+    size_t len = decoder.dedup_len;
     for (size_t i = 0; i < PREFIX_SIZE; i++)
     {
         cl_uchar4 param1;
         param1.s[0] = PREFIX_LIST[i] / 100 + '0';
         param1.s[1] = (PREFIX_LIST[i] % 100) / 10 + '0';
         param1.s[2] = PREFIX_LIST[i] % 10 + '0';
-        clSetKernelArg (kernel, 1, sizeof (int), &type);
-        clSetKernelArg (kernel, 2, sizeof (int), &len);
-        clSetKernelArg (kernel, 3, sizeof (cl_uchar4), &param1);
+        clSetKernelArg (kernel, 3, sizeof (int), &type);
+        clSetKernelArg (kernel, 4, sizeof (size_t), &len);
+        clSetKernelArg (kernel, 5, sizeof (cl_uchar4), &param1);
         // call opencl
-        const size_t globalWorkSize [] = { SLICE_LEN, 0, 0 };
-	    CheckCLError (clEnqueueNDRangeKernel (queue, kernel, 1,
+        const size_t globalWorkSize [] = { 10000, 10000, 0 };
+	    CheckCLError (clEnqueueNDRangeKernel (queue, kernel, 2,
             nullptr,
             globalWorkSize,
             nullptr,
             0, nullptr, nullptr));
 
-        CheckCLError (clEnqueueReadBuffer (queue, aBuffer, CL_TRUE, 0,
-            sdh_len,
-            decoder.s_data_hash,
+        CheckCLError (clEnqueueReadBuffer (queue, buffer2, CL_TRUE, 0,
+            sizeof (size_t),
+		    &decoder.count,
             0, nullptr, nullptr));
 
-        decoder.count = 0;
-        for (size_t h = 0; h < decoder.dedup_len; h++)
-        {
-            if (decoder.s_data_hash[h].data_hash.data[0])
-            {
-                decoder.count++;
-            }
-        }
         printf("\033[1A%zu/%zu @%lds - searching %lu%%...\n", decoder.count, decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
         if (decoder.count == decoder.dedup_len)
         {
             break;
         }
     }
+    // read results
+    CheckCLError (clEnqueueReadBuffer (queue, buffer0, CL_TRUE, 0,
+        sdh_len,
+        decoder.s_data_hash,
+        0, nullptr, nullptr));
 
-	clReleaseMemObject (aBuffer);
+	clReleaseMemObject (buffer2);
+    clReleaseMemObject (buffer1);
+    clReleaseMemObject (buffer0);
 
     // write reults
     printf("total %zu hashes are decoded\n", decoder.count);
