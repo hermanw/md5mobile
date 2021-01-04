@@ -163,8 +163,8 @@ __kernel void compute(__global SortedDataHash* sdh, __global uint8_t* p_numbers,
 {
     if(*count >= len) return;
 
-	const size_t x = get_global_id (0);
-    const size_t y = get_global_id (1);
+	const size_t x = get_global_id (0)*5;
+    const size_t y = get_global_id (1)*5;
 
     uint8_t data[BLOCK_LEN]= {0};
     uint32_t hash[STATE_LEN] = {0x67452301UL, 0xEFCDAB89UL, 0x98BADCFEUL, 0x10325476UL};
@@ -177,14 +177,14 @@ __kernel void compute(__global SortedDataHash* sdh, __global uint8_t* p_numbers,
         data[0] = param1[0];
         data[1] = param1[1];
         data[2] = param1[2];
-        data[3] = p_numbers[x*5];
-        data[4] = p_numbers[x*5 + 1];
-        data[5] = p_numbers[x*5 + 2];
-        data[6] = p_numbers[x*5 + 3];
-        data[7] = p_numbers[y*5];
-        data[8] = p_numbers[y*5 + 1];
-        data[9] = p_numbers[y*5 + 2];
-        data[10] = p_numbers[y*5 + 3];
+        data[3] = p_numbers[x];
+        data[4] = p_numbers[x + 1];
+        data[5] = p_numbers[x + 2];
+        data[6] = p_numbers[x + 3];
+        data[7] = p_numbers[y];
+        data[8] = p_numbers[y + 1];
+        data[9] = p_numbers[y + 2];
+        data[10] = p_numbers[y + 3];
     }
 
     md5_compress(hash, data);
