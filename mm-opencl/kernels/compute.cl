@@ -3,24 +3,18 @@
 #define LENGTH_SIZE 8 // In bytes
 #define MOBILE_LEN 11
 
-#define DATA_TYPE_MOBILE 0
-#define DATA_TYPE_CNID 1
-
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
 
 typedef struct
 {
-    uint8_t data[BLOCK_LEN];
-    uint32_t hash[STATE_LEN];
-} DataHash;
+    uint32_t value[STATE_LEN];
+} Hash;
 
 typedef struct
 {
-    int index;
-    int index_dup;
-    DataHash data_hash;
-} SortedDataHash;
+    uint8_t value[MOBILE_LEN];
+} MobileData;
 
 static int compare_hash(__global const uint32_t* a, const uint32_t* b)
 {
@@ -39,13 +33,13 @@ static int compare_hash(__global const uint32_t* a, const uint32_t* b)
     return 0;
 }
 
-static int binary_search(__global SortedDataHash* array, int len, const uint32_t* hash)
+static int binary_search(__global const Hash* p_hash, int len, const uint32_t* hash)
 {
     int low = 0, high = len - 1, mid;
     while (low <= high)
     {
         mid = (low + high) / 2;
-        int r = compare_hash(array[mid].data_hash.hash, hash);
+        int r = compare_hash(p_hash[mid].value, hash);
         if (r == 0)
         {
             return mid;
@@ -158,47 +152,44 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
     state[3] = 0U + state[3] + d;
 }
 
-__kernel void compute(__global SortedDataHash* sdh, __global uint8_t* p_numbers, __global unsigned int* count,
-    int type, unsigned int len, uchar4 param1)
+__kernel void compute(__global Hash* p_hash,
+    __global MobileData* p_data,
+    __global uint8_t* p_numbers,
+    __global unsigned int* count,
+    unsigned int len, uchar4 param1)
 {
     if(*count >= len) return;
 
-	const size_t x = get_global_id (0)*5;
-    const size_t y = get_global_id (1)*5;
+	const size_t x = get_global_id (0)*4;
+    const size_t y = get_global_id (1)*4;
 
     uint8_t data[BLOCK_LEN]= {0};
     uint32_t hash[STATE_LEN] = {0x67452301UL, 0xEFCDAB89UL, 0x98BADCFEUL, 0x10325476UL};
 
-    if(type == DATA_TYPE_MOBILE)
-    {
-        // fill mobile digits
-        data[MOBILE_LEN] = 0x80;
-        data[BLOCK_LEN - LENGTH_SIZE] = 'X';
-        data[0] = param1[0];
-        data[1] = param1[1];
-        data[2] = param1[2];
-        data[3] = p_numbers[x];
-        data[4] = p_numbers[x + 1];
-        data[5] = p_numbers[x + 2];
-        data[6] = p_numbers[x + 3];
-        data[7] = p_numbers[y];
-        data[8] = p_numbers[y + 1];
-        data[9] = p_numbers[y + 2];
-        data[10] = p_numbers[y + 3];
-    }
+    // fill mobile digits
+    data[MOBILE_LEN] = 0x80;
+    data[BLOCK_LEN - LENGTH_SIZE] = 'X';
+    data[0] = param1[0];
+    data[1] = param1[1];
+    data[2] = param1[2];
+    data[3] = p_numbers[x];
+    data[4] = p_numbers[x + 1];
+    data[5] = p_numbers[x + 2];
+    data[6] = p_numbers[x + 3];
+    data[7] = p_numbers[y];
+    data[8] = p_numbers[y + 1];
+    data[9] = p_numbers[y + 2];
+    data[10] = p_numbers[y + 3];
 
     md5_compress(hash, data);
 
-    int index = binary_search(sdh, (int)len, hash);
+    int index = binary_search(p_hash, (int)len, hash);
     if (index >= 0)
     {
-        if(type == DATA_TYPE_MOBILE)
+        atomic_inc(count);
+        for(int j = 0; j < MOBILE_LEN; j++)
         {
-            atomic_inc(count);
-            for(int j = 0; j < MOBILE_LEN; j++)
-            {
-                sdh[index].data_hash.data[j] = data[j];
-            }
+            p_data[index].value[j] = data[j];
         }
     }
 }

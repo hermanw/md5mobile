@@ -7,5 +7,5 @@ set(CMAKE_BUILD_TYPE Release)
 find_package(OpenCL REQUIRED)
 include_directories(${OpenCL_INCLUDE_DIR})
 
-add_executable(mm mm.cpp)
+add_executable(mm mm.cpp decoder.cpp)
 target_link_libraries(mm ${OpenCL_LIBRARY})

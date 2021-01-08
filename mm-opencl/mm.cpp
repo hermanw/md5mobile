@@ -1,7 +1,4 @@
 #include <stdio.h>
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
 #include <time.h>
 
 #ifdef __APPLE__
@@ -11,39 +8,7 @@
 #endif
 
 #include "mm.h"
-
-#define MOBILE_LEN 11
-#define BLOCK_LEN 64 // In bytes
-#define STATE_LEN 4  // In words
-#define LENGTH_SIZE 8 // In bytes
-#define HASH_LEN 32
-
-typedef struct
-{
-    uint8_t data[BLOCK_LEN];
-    uint32_t hash[STATE_LEN];
-} DataHash;
-
-typedef struct
-{
-    int index;
-    int index_dup;
-    DataHash data_hash;
-} SortedDataHash;
-
-#define DATA_TYPE_MOBILE 0
-#define DATA_TYPE_CNID 1
-
-typedef char HashString[HASH_LEN];
-typedef struct
-{
-    HashString* hash_string;
-    size_t hash_len;
-    DataHash* data_hash;
-    SortedDataHash* s_data_hash;
-    size_t dedup_len;
-    size_t count;
-} Decoder;
+#include "decoder.h"
 
 // constants
 static const uint8_t PREFIX_LIST[] =
@@ -99,211 +64,11 @@ void write_to_file(char* filename, Decoder* decoder)
         fputc(',', f);
         for (size_t i = 0; i < MOBILE_LEN; i++)
         {
-            fputc(decoder->data_hash[h].data[i], f);
+            fputc(decoder->m_data[h].value[i], f);
         }
         fputc('\n', f);
     }
     fclose(f);
-}
-
-int compare_hash(const uint32_t* a, const uint32_t* b)
-{
-    for (int i = 0; i < STATE_LEN; i++)
-    {
-        if (a[i] < b[i])
-        {
-            return -1;
-        }
-        else if (a[i] > b[i])
-        {
-            return 1;
-        }        
-    }
-
-    return 0;
-}
-
-void quick_sort(SortedDataHash* array, int from, int to)
-{
-    if (from >= to)return;
-    SortedDataHash temp;
-    int i = from, j;
-    for (j = from + 1; j <= to; j++)
-    {
-        if (compare_hash(array[j].data_hash.hash, array[from].data_hash.hash) < 0)
-        {
-            i = i + 1;
-            temp = array[i];
-            array[i] = array[j];
-            array[j] = temp;
-        }
-    }
-
-    temp = array[i];
-    array[i] = array[from];
-    array[from] = temp;
-    quick_sort(array, from, i - 1);
-    quick_sort(array, i + 1, to);
-}
-
-inline char hexToNibble(char n)
-{
-    return n - (n <= '9' ? '0' : ('a' - 10));
-}
-void hex_to_bytes(uint8_t* to, char* from, int len)
-{
-    for (int i = 0; i < len / 2; i++)
-    {
-        to[i] = (hexToNibble(from[i * 2]) << 4) + hexToNibble(from[i * 2 + 1]);
-    }
-}
-
-void print_data_hash(DataHash* dh) {
-    for (size_t i = 0; i < STATE_LEN; i++)
-    {
-        printf("%x-", dh->hash[i]);
-    }
-    printf(",");
-    for (size_t i = 0; i < MOBILE_LEN; i++)
-    {
-        printf("%c", dh->data[i]);
-    }
-    printf("\n");
-}
-void print_sorted_data_hash(SortedDataHash* sdh) {
-    printf("%d,%d,", sdh->index, sdh->index_dup);
-    print_data_hash(&sdh->data_hash);
-}
-
-size_t validate_hash_string(const char* s)
-{
-    int valid_char_num = 0;
-    int count = 0;
-    while (*s)
-    {
-        if (*s == ',')
-        {
-            if (valid_char_num == HASH_LEN)
-            {
-                count++;
-            }
-            valid_char_num = 0;
-        }
-        else if ((*s >= 'a' && *s <= 'z') || (*s >= '0' && *s <= '9'))
-        {
-            valid_char_num++;
-        }
-        s++;
-    }
-    if (valid_char_num == HASH_LEN)
-    {
-        count++;
-    }
-
-    return count;
-}
-
-void parse_hash_strings(Decoder& decoder, const char* s)
-{
-    SortedDataHash* p_sdh = decoder.s_data_hash;
-    HashString* p_hs = decoder.hash_string;
-
-    int valid_char_num = 0;
-    int count = 0;
-    char hash_string[HASH_LEN];
-    while (*s)
-    {
-        if (*s == ',')
-        {
-            if (valid_char_num == HASH_LEN)
-            {
-                memcpy(p_hs, hash_string, HASH_LEN);
-                hex_to_bytes((uint8_t*)p_sdh->data_hash.hash, hash_string, HASH_LEN);
-                p_sdh->index = count;
-                count++;
-                p_sdh++;
-                p_hs++;
-            }
-            valid_char_num = 0;
-        }
-        else if ((*s >= 'a' && *s <= 'z') || (*s >= '0' && *s <= '9'))
-        {
-            hash_string[valid_char_num] = *s;
-            valid_char_num++;
-        }
-        s++;
-    }
-    if (valid_char_num == HASH_LEN)
-    {
-        memcpy(p_hs, hash_string, HASH_LEN);
-        hex_to_bytes((uint8_t*)p_sdh->data_hash.hash, hash_string, HASH_LEN);
-        p_sdh->index = count;
-    }
-}
-
-void dedup_sorted_data_hash(Decoder& decoder)
-{
-    decoder.dedup_len = decoder.hash_len;
-    for (size_t i = 1; i < decoder.dedup_len; i++)
-    {
-        if (compare_hash(decoder.s_data_hash[i].data_hash.hash, decoder.s_data_hash[i - 1].data_hash.hash) == 0)
-        {
-            SortedDataHash temp = decoder.s_data_hash[i];
-            temp.index_dup = decoder.s_data_hash[i - 1].index;
-            for (size_t j = i; j < decoder.hash_len - 1; j++)
-            {
-                decoder.s_data_hash[j] = decoder.s_data_hash[j + 1];
-            }
-            decoder.s_data_hash[decoder.hash_len - 1] = temp;
-            decoder.dedup_len--;
-            i--;
-        }
-    }
-}
-
-
-void resort_data_hash(Decoder& decoder)
-{
-    for (int i = 0; i < decoder.hash_len; i++)
-    {
-        if (i < decoder.dedup_len)
-        {
-            int index = decoder.s_data_hash[i].index;
-            decoder.data_hash[index] = decoder.s_data_hash[i].data_hash;
-        }
-        else
-        {
-            int index = decoder.s_data_hash[i].index;
-            int index_dup = decoder.s_data_hash[i].index_dup;
-            decoder.data_hash[index] = decoder.data_hash[index_dup];
-        }
-    }
-}
-
-void init_decoder(Decoder& decoder, const char* s)
-{
-    decoder.hash_len = validate_hash_string(s);
-    decoder.hash_string = (HashString*)calloc(decoder.hash_len, sizeof(HashString));
-    decoder.data_hash = (DataHash*)calloc(decoder.hash_len, sizeof(DataHash));
-    decoder.s_data_hash = (SortedDataHash*)calloc(decoder.hash_len, sizeof(SortedDataHash));
-    decoder.count = 0;
-    parse_hash_strings(decoder, s);
-    quick_sort(decoder.s_data_hash, 0, decoder.hash_len - 1);
-    dedup_sorted_data_hash(decoder);
-    // for (size_t i = 0; i < decoder.hash_len; i++)
-    // {
-    //     printf("%zu,", i);
-    //     print_sorted_data_hash(decoder.s_data_hash+i);
-    // }
-}
-void free_decoder(Decoder& decoder)
-{
-    free(decoder.hash_string);
-    decoder.hash_string = 0;
-    free(decoder.data_hash);
-    decoder.data_hash = 0;
-    free(decoder.s_data_hash);
-    decoder.s_data_hash = 0;
 }
 
 void _CheckCLError (cl_int error, int line)
@@ -347,7 +112,7 @@ int init_opencl()
     clGetDeviceInfo (device_id, CL_DEVICE_NAME, 0, nullptr, &size);
     char *name = (char *)malloc(sizeof(char) * size);
     clGetDeviceInfo (device_id, CL_DEVICE_NAME, size, name, nullptr);
-    printf("decode using %s\n", name);
+    printf("using %s\n", name);
     free(name);
 
 	const cl_context_properties contextProperties [] =
@@ -397,11 +162,11 @@ int main(int argc, char* argv[])
     }
 
     Decoder decoder;
-    init_decoder(decoder, s);
+    init_decoder(&decoder, s);
     free(s);
     s = 0;
-    printf("find %zu hashes\n", decoder.hash_len);
-    printf("they have %zu duplicated, %zu unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
+    printf("find %d hashes\n", decoder.hash_len);
+    printf("they have %d duplicated, %d unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
 
     // setup OpenCL
     if(init_opencl())
@@ -410,47 +175,60 @@ int main(int argc, char* argv[])
     }
 
     // buffer0 for hash
-    size_t sdh_len = decoder.dedup_len * sizeof(SortedDataHash);
+    Hash* p_hash = (Hash*)calloc(decoder.dedup_len, sizeof(Hash));
+    for (int i = 0; i < decoder.dedup_len; i++)
+    {
+        p_hash[i] = decoder.s_hash[i].hash;
+    }
     cl_int error = CL_SUCCESS;
-    cl_mem buffer0 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-		sdh_len,
-		decoder.s_data_hash, &error);
+    cl_mem buffer0 = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+		decoder.dedup_len * sizeof(Hash),
+		p_hash, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 0, sizeof (cl_mem), &buffer0);
+    free(p_hash);
 
-    // buffer1 for number helper strings
-    char* p_numbers = (char *)malloc(10000 * 5);
-    for (size_t i = 0; i < 10000; i++)
-    {
-        sprintf(p_numbers+i*5, "%04zu", i);
-    }
-    cl_mem buffer1 = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-		10000 * 5,
-		p_numbers, &error);
+    // buffer1 for mobile data
+    cl_mem buffer1 = clCreateBuffer (context, CL_MEM_WRITE_ONLY,
+		decoder.dedup_len * sizeof(MobileData),
+		0, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 1, sizeof (cl_mem), &buffer1);
-    free(p_numbers);
 
-    // buffer2 for progress
-    cl_mem buffer2 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-		sizeof (size_t),
-		&decoder.count, &error);
+    // buffer2 for number helper strings
+    char* p_numbers = (char *)malloc(10000 * 4);
+    for (size_t i = 0; i < 10000; i++)
+    {
+        p_numbers[i*4+0] = i/1000 + '0';
+        p_numbers[i*4+1] = i/100%10 + '0';
+        p_numbers[i*4+2] = i/10%10 + '0';
+        p_numbers[i*4+3] = i%10 + '0';
+    }
+    cl_mem buffer2 = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+		10000 * 4,
+		p_numbers, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 2, sizeof (cl_mem), &buffer2);
+    free(p_numbers);
+
+    // buffer3 for progress
+    cl_mem buffer3 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+		sizeof (int),
+		&decoder.count, &error);
+	CheckCLError (error);
+    clSetKernelArg (kernel, 3, sizeof (cl_mem), &buffer3);
 
     // work on each prefix
     time_t start = time(NULL);
-    printf("0%% @%lds - 0/%zu\n", time(NULL) - start, decoder.dedup_len);
-    int type = DATA_TYPE_MOBILE;
-    size_t len = decoder.dedup_len;
-    for (size_t i = 0; i < PREFIX_SIZE; i++)
+    printf("starting...\n");
+    int len = decoder.dedup_len;
+    for (int i = 0; i < PREFIX_SIZE; i++)
     {
         cl_uchar4 param1;
         param1.s[0] = PREFIX_LIST[i] / 100 + '0';
-        param1.s[1] = (PREFIX_LIST[i] % 100) / 10 + '0';
+        param1.s[1] = (PREFIX_LIST[i] / 10) % 10 + '0';
         param1.s[2] = PREFIX_LIST[i] % 10 + '0';
-        clSetKernelArg (kernel, 3, sizeof (int), &type);
-        clSetKernelArg (kernel, 4, sizeof (size_t), &len);
+        clSetKernelArg (kernel, 4, sizeof (int), &len);
         clSetKernelArg (kernel, 5, sizeof (cl_uchar4), &param1);
         // call opencl
         const size_t globalWorkSize [] = { 10000, 10000, 0 };
@@ -460,30 +238,30 @@ int main(int argc, char* argv[])
             nullptr,
             0, nullptr, nullptr));
 
-        CheckCLError (clEnqueueReadBuffer (queue, buffer2, CL_TRUE, 0,
-            sizeof (size_t),
+        CheckCLError (clEnqueueReadBuffer (queue, buffer3, CL_TRUE, 0,
+            sizeof (int),
 		    &decoder.count,
             0, nullptr, nullptr));
 
-        printf("\033[1A%zu/%zu @%lds - searching %lu%%...\n", decoder.count, decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
+        printf("\033[1A%d/%d @%lds - searching %lu%%...\n", decoder.count, decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
         if (decoder.count == decoder.dedup_len)
         {
             break;
         }
     }
-    // read results
-    CheckCLError (clEnqueueReadBuffer (queue, buffer0, CL_TRUE, 0,
-        sdh_len,
-        decoder.s_data_hash,
-        0, nullptr, nullptr));
+    printf("total %d hashes are decoded\n", decoder.count);
 
-	clReleaseMemObject (buffer2);
-    clReleaseMemObject (buffer1);
-    clReleaseMemObject (buffer0);
+    // read results
+    MobileData* p_m_data = (MobileData*)calloc(decoder.dedup_len, sizeof(MobileData));
+    CheckCLError (clEnqueueReadBuffer (queue, buffer1, CL_TRUE, 0,
+        decoder.dedup_len * sizeof(MobileData),
+        p_m_data,
+        0, nullptr, nullptr));
+    resort_data(&decoder, p_m_data);
+    free(p_m_data);
+    p_m_data = 0;
 
     // write reults
-    printf("total %zu hashes are decoded\n", decoder.count);
-    resort_data_hash(decoder);
     size_t fn_len = strlen(argv[1]) + 5;
     char* outfile = (char*)malloc(fn_len);
     strcpy(outfile, argv[1]);
@@ -493,6 +271,11 @@ int main(int argc, char* argv[])
     free(outfile);
 
     // release resources
+	clReleaseMemObject (buffer3);
+	clReleaseMemObject (buffer2);
+    clReleaseMemObject (buffer1);
+    clReleaseMemObject (buffer0);
+
     release_opencl();
-    free_decoder(decoder);
+    free_decoder(&decoder);
 }
