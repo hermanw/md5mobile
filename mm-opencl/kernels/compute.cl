@@ -155,10 +155,9 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
 __kernel void compute(__global Hash* p_hash,
     __global MobileData* p_data,
     __global uint8_t* p_numbers,
-    __global unsigned int* count,
-    unsigned int len, uchar4 param1)
+    __global unsigned int* params)
 {
-    if(*count >= len) return;
+    if(params[1] >= params[0]) return;
 
 	const size_t x = get_global_id (0)*4;
     const size_t y = get_global_id (1)*4;
@@ -169,9 +168,9 @@ __kernel void compute(__global Hash* p_hash,
     // fill mobile digits
     data[MOBILE_LEN] = 0x80;
     data[BLOCK_LEN - LENGTH_SIZE] = 'X';
-    data[0] = param1[0];
-    data[1] = param1[1];
-    data[2] = param1[2];
+    data[0] = (uint8_t)params[2];
+    data[1] = (uint8_t)params[3];
+    data[2] = (uint8_t)params[4];
     data[3] = p_numbers[x];
     data[4] = p_numbers[x + 1];
     data[5] = p_numbers[x + 2];
@@ -183,10 +182,10 @@ __kernel void compute(__global Hash* p_hash,
 
     md5_compress(hash, data);
 
-    int index = binary_search(p_hash, (int)len, hash);
+    int index = binary_search(p_hash, (int)params[0], hash);
     if (index >= 0)
     {
-        atomic_inc(count);
+        atomic_inc(params+1);
         for(int j = 0; j < MOBILE_LEN; j++)
         {
             p_data[index].value[j] = data[j];

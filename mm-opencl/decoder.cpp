@@ -159,7 +159,6 @@ void init_decoder(Decoder* decoder, const char* s)
     quick_sort(decoder->s_hash, 0, decoder->hash_len - 1);
     dedup_sorted_hash(decoder);
     decoder->m_data = (MobileData*)calloc(decoder->hash_len, sizeof(MobileData));
-    decoder->count = 0;
 }
 
 void free_decoder(Decoder* decoder)

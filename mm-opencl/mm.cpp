@@ -211,25 +211,24 @@ int main(int argc, char* argv[])
     clSetKernelArg (kernel, 2, sizeof (cl_mem), &buffer2);
     free(p_numbers);
 
-    // buffer3 for progress
-    cl_mem buffer3 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-		sizeof (int),
-		&decoder.count, &error);
-	CheckCLError (error);
-    clSetKernelArg (kernel, 3, sizeof (cl_mem), &buffer3);
+    // buffer3 for params
+    int params[5];
+    params[0] = decoder.dedup_len;
+    params[1] = 0;
 
     // work on each prefix
     time_t start = time(NULL);
     printf("starting...\n");
-    int len = decoder.dedup_len;
     for (int i = 0; i < PREFIX_SIZE; i++)
     {
-        cl_uchar4 param1;
-        param1.s[0] = PREFIX_LIST[i] / 100 + '0';
-        param1.s[1] = (PREFIX_LIST[i] / 10) % 10 + '0';
-        param1.s[2] = PREFIX_LIST[i] % 10 + '0';
-        clSetKernelArg (kernel, 4, sizeof (int), &len);
-        clSetKernelArg (kernel, 5, sizeof (cl_uchar4), &param1);
+        params[2] = PREFIX_LIST[i] / 100 + '0';
+        params[3] = (PREFIX_LIST[i] / 10) % 10 + '0';
+        params[4] = PREFIX_LIST[i] % 10 + '0';
+        cl_mem buffer3 = clCreateBuffer (context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+            sizeof (int) * 5,
+            params, &error);
+        CheckCLError (error);
+        clSetKernelArg (kernel, 3, sizeof (cl_mem), &buffer3);
         // call opencl
         const size_t globalWorkSize [] = { 10000, 10000, 0 };
 	    CheckCLError (clEnqueueNDRangeKernel (queue, kernel, 2,
@@ -239,17 +238,18 @@ int main(int argc, char* argv[])
             0, nullptr, nullptr));
 
         CheckCLError (clEnqueueReadBuffer (queue, buffer3, CL_TRUE, 0,
-            sizeof (int),
-		    &decoder.count,
+            sizeof (int)*5,
+		    params,
             0, nullptr, nullptr));
+    	clReleaseMemObject (buffer3);
 
-        printf("\033[1A%d/%d @%lds - searching %lu%%...\n", decoder.count, decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
-        if (decoder.count == decoder.dedup_len)
+        printf("\033[1A%d/%d @%lds - searching %lu%%...\n", params[1], decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
+        if (params[1] == decoder.dedup_len)
         {
             break;
         }
     }
-    printf("total %d hashes are decoded\n", decoder.count);
+    printf("total %d hashes are decoded\n", params[1]);
 
     // read results
     MobileData* p_m_data = (MobileData*)calloc(decoder.dedup_len, sizeof(MobileData));
@@ -271,7 +271,6 @@ int main(int argc, char* argv[])
     free(outfile);
 
     // release resources
-	clReleaseMemObject (buffer3);
 	clReleaseMemObject (buffer2);
     clReleaseMemObject (buffer1);
     clReleaseMemObject (buffer0);

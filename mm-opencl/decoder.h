@@ -30,7 +30,6 @@ typedef struct
 {
     int hash_len;
     int dedup_len;
-    int count;
     HashString* hash_string;
     SortedHash* s_hash;
     MobileData* m_data;
