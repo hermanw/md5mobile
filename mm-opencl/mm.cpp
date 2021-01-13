@@ -152,11 +152,11 @@ void release_opencl() {
 
 int main(int argc, char* argv[])
 {
+    printf("md5 decoder [opencl], v1.0, by herman\n");
     // process hash file
     char* s = NULL;
     if (argc < 2 || !(s = read_from_file(argv[1])))
     {
-        printf("md5 decoder [opencl], v1.0, by herman\n");
         printf("usage: mm filename\n");
         return 1;
     }
@@ -165,8 +165,7 @@ int main(int argc, char* argv[])
     init_decoder(&decoder, s);
     free(s);
     s = 0;
-    printf("find %d hashes\n", decoder.hash_len);
-    printf("they have %d duplicated, %d unique ones\n", decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
+    printf("find %d hashes (%d duplicated, %d unique)\n", decoder.hash_len, decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
 
     // setup OpenCL
     if(init_opencl())
