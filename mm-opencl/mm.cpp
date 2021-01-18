@@ -161,8 +161,7 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    Decoder decoder;
-    init_decoder(&decoder, s);
+    Decoder decoder(s);
     free(s);
     s = 0;
     printf("find %d hashes (%d duplicated, %d unique)\n", decoder.hash_len, decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
@@ -256,7 +255,7 @@ int main(int argc, char* argv[])
         decoder.dedup_len * sizeof(MobileData),
         p_m_data,
         0, nullptr, nullptr));
-    resort_data(&decoder, p_m_data);
+    decoder.resort_data(p_m_data);
     free(p_m_data);
     p_m_data = 0;
 
@@ -275,5 +274,4 @@ int main(int argc, char* argv[])
     clReleaseMemObject (buffer0);
 
     release_opencl();
-    free_decoder(&decoder);
 }

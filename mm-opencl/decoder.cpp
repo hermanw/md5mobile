@@ -1,15 +1,16 @@
 #include "decoder.h"
 
-int is_valid_digit(const char c) {
+int Decoder::is_valid_digit(const char c)
+{
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
 }
-char hexToNibble(char n)
+char Decoder::hexToNibble(char n)
 {
-    if(n >= 'a' && n <= 'f')
+    if (n >= 'a' && n <= 'f')
     {
         return n - 'a' + 10;
     }
-    else if(n >= 'A' && n <= 'F')
+    else if (n >= 'A' && n <= 'F')
     {
         return n - 'A' + 10;
     }
@@ -18,7 +19,7 @@ char hexToNibble(char n)
         return n - '0';
     }
 }
-void hex_to_bytes(uint8_t* to, const char* from, int len)
+void Decoder::hex_to_bytes(uint8_t *to, const char *from, int len)
 {
     for (int i = 0; i < len / 2; i++)
     {
@@ -26,27 +27,27 @@ void hex_to_bytes(uint8_t* to, const char* from, int len)
     }
 }
 
-void update_hash(Decoder* decoder, const char* hash_string, int index)
+void Decoder::update_hash(const char *a_hash_string, int index)
 {
-    memcpy(decoder->hash_string[index], hash_string, HASH_LEN);
-    hex_to_bytes((uint8_t*)(decoder->s_hash[index].hash.value), hash_string, HASH_LEN);
-    decoder->s_hash[index].index = index;
+    memcpy(hash_string[index], a_hash_string, HASH_LEN);
+    hex_to_bytes((uint8_t *)(s_hash[index].hash.value), a_hash_string, HASH_LEN);
+    s_hash[index].index = index;
 }
 
-int parse_hash_strings(Decoder* decoder, const char* s)
+int Decoder::parse_hash_strings(bool is_update, const char *s)
 {
     int valid_digit_num = 0;
     int count = 0;
-    char hash_string[HASH_LEN];
+    char a_hash_string[HASH_LEN];
     while (*s)
     {
         if (*s == ',')
         {
             if (valid_digit_num == HASH_LEN)
             {
-                if (decoder)
+                if (is_update)
                 {
-                    update_hash(decoder, hash_string, count);
+                    update_hash(a_hash_string, count);
                 }
                 count++;
             }
@@ -54,9 +55,9 @@ int parse_hash_strings(Decoder* decoder, const char* s)
         }
         else if (is_valid_digit(*s))
         {
-            if(decoder)
+            if (is_update)
             {
-                hash_string[valid_digit_num] = *s;
+                a_hash_string[valid_digit_num] = *s;
             }
             valid_digit_num++;
         }
@@ -64,16 +65,16 @@ int parse_hash_strings(Decoder* decoder, const char* s)
     }
     if (valid_digit_num == HASH_LEN)
     {
-        if (decoder)
+        if (is_update)
         {
-            update_hash(decoder, hash_string, count);
+            update_hash(a_hash_string, count);
         }
         count++;
     }
     return count;
 }
 
-int compare_hash(const uint32_t* a, const uint32_t* b)
+int Decoder::compare_hash(const uint32_t *a, const uint32_t *b)
 {
     for (int i = 0; i < STATE_LEN; i++)
     {
@@ -84,15 +85,16 @@ int compare_hash(const uint32_t* a, const uint32_t* b)
         else if (a[i] > b[i])
         {
             return 1;
-        }        
+        }
     }
 
     return 0;
 }
 
-void quick_sort(SortedHash* array, int from, int to)
+void Decoder::quick_sort(SortedHash *array, int from, int to)
 {
-    if (from >= to)return;
+    if (from >= to)
+        return;
     SortedHash temp;
     int i = from, j;
     for (j = from + 1; j <= to; j++)
@@ -113,60 +115,60 @@ void quick_sort(SortedHash* array, int from, int to)
     quick_sort(array, i + 1, to);
 }
 
-void dedup_sorted_hash(Decoder* decoder)
+void Decoder::dedup_sorted_hash()
 {
-    decoder->dedup_len = decoder->hash_len;
-    for (int i = 1; i < decoder->dedup_len; i++)
+    dedup_len = hash_len;
+    for (int i = 1; i < dedup_len; i++)
     {
-        if (compare_hash(decoder->s_hash[i].hash.value, decoder->s_hash[i - 1].hash.value) == 0)
+        if (compare_hash(s_hash[i].hash.value, s_hash[i - 1].hash.value) == 0)
         {
-            SortedHash temp = decoder->s_hash[i];
-            temp.index_dup = decoder->s_hash[i - 1].index;
-            for (int j = i; j < decoder->hash_len - 1; j++)
+            SortedHash temp = s_hash[i];
+            temp.index_dup = s_hash[i - 1].index;
+            for (int j = i; j < hash_len - 1; j++)
             {
-                decoder->s_hash[j] = decoder->s_hash[j + 1];
+                s_hash[j] = s_hash[j + 1];
             }
-            decoder->s_hash[decoder->hash_len - 1] = temp;
-            decoder->dedup_len--;
+            s_hash[hash_len - 1] = temp;
+            dedup_len--;
             i--;
         }
     }
 }
 
-void resort_data(Decoder* decoder, MobileData* p_m_data)
+void Decoder::resort_data(MobileData *p_m_data)
 {
-    for (int i = 0; i < decoder->hash_len; i++)
+    for (int i = 0; i < hash_len; i++)
     {
-        int index = decoder->s_hash[i].index;
-        if (i < decoder->dedup_len)
+        int index = s_hash[i].index;
+        if (i < dedup_len)
         {
-            decoder->m_data[index] = p_m_data[i];
+            m_data[index] = p_m_data[i];
         }
         else
         {
-            int index_dup = decoder->s_hash[i].index_dup;
-            decoder->m_data[index] = decoder->m_data[index_dup];
+            int index_dup = s_hash[i].index_dup;
+            m_data[index] = m_data[index_dup];
         }
     }
 }
 
-void init_decoder(Decoder* decoder, const char* s)
+Decoder::Decoder(const char *s)
 {
-    decoder->hash_len = parse_hash_strings(0, s);
-    decoder->hash_string = (HashString*)calloc(decoder->hash_len, sizeof(HashString));
-    decoder->s_hash = (SortedHash*)calloc(decoder->hash_len, sizeof(SortedHash));
-    parse_hash_strings(decoder, s);
-    quick_sort(decoder->s_hash, 0, decoder->hash_len - 1);
-    dedup_sorted_hash(decoder);
-    decoder->m_data = (MobileData*)calloc(decoder->hash_len, sizeof(MobileData));
+    hash_len = parse_hash_strings(false, s);
+    hash_string = (HashString *)calloc(hash_len, sizeof(HashString));
+    s_hash = (SortedHash *)calloc(hash_len, sizeof(SortedHash));
+    parse_hash_strings(true, s);
+    quick_sort(s_hash, 0, hash_len - 1);
+    dedup_sorted_hash();
+    m_data = (MobileData *)calloc(hash_len, sizeof(MobileData));
 }
 
-void free_decoder(Decoder* decoder)
+Decoder::~Decoder()
 {
-    free(decoder->hash_string);
-    decoder->hash_string = 0;
-    free(decoder->s_hash);
-    decoder->s_hash = 0;
-    free(decoder->m_data);
-    decoder->m_data = 0;
+    free(hash_string);
+    hash_string = 0;
+    free(s_hash);
+    s_hash = 0;
+    free(m_data);
+    m_data = 0;
 }
