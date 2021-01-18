@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <time.h>
+#include <string.h>
 
 #ifdef __APPLE__
 	#include "OpenCL/opencl.h"
@@ -55,19 +56,9 @@ char* read_from_file(char* filename)
 void write_to_file(char* filename, Decoder* decoder)
 {
     FILE* f = fopen(filename, "w");
-    for (int h = 0; h < decoder->hash_len; h++)
-    {
-        for (size_t i = 0; i < HASH_LEN; i++)
-        {
-            fputc(decoder->hash_string[h][i], f);
-        }
-        fputc(',', f);
-        for (size_t i = 0; i < MOBILE_LEN; i++)
-        {
-            fputc(decoder->m_data[h].value[i], f);
-        }
-        fputc('\n', f);
-    }
+    std::string result;
+    decoder->get_result(result);
+    fputs(result.c_str(), f);
     fclose(f);
 }
 
@@ -164,7 +155,9 @@ int main(int argc, char* argv[])
     Decoder decoder(s);
     free(s);
     s = 0;
-    printf("find %d hashes (%d duplicated, %d unique)\n", decoder.hash_len, decoder.hash_len - decoder.dedup_len, decoder.dedup_len);
+    const int hash_len = decoder.get_hash_len();
+    const int dedup_len = decoder.get_dedup_len();
+    printf("find %d hashes (%d duplicated, %d unique)\n", hash_len, hash_len - dedup_len, dedup_len);
 
     // setup OpenCL
     if(init_opencl())
@@ -173,22 +166,18 @@ int main(int argc, char* argv[])
     }
 
     // buffer0 for hash
-    Hash* p_hash = (Hash*)calloc(decoder.dedup_len, sizeof(Hash));
-    for (int i = 0; i < decoder.dedup_len; i++)
-    {
-        p_hash[i] = decoder.s_hash[i].hash;
-    }
+    Hash* p_hash = decoder.create_hash_buffer();
     cl_int error = CL_SUCCESS;
     cl_mem buffer0 = clCreateBuffer (context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-		decoder.dedup_len * sizeof(Hash),
+		dedup_len * sizeof(Hash),
 		p_hash, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 0, sizeof (cl_mem), &buffer0);
-    free(p_hash);
+    delete[] p_hash;
 
     // buffer1 for mobile data
     cl_mem buffer1 = clCreateBuffer (context, CL_MEM_WRITE_ONLY,
-		decoder.dedup_len * sizeof(MobileData),
+		dedup_len * sizeof(MobileData),
 		0, &error);
 	CheckCLError (error);
     clSetKernelArg (kernel, 1, sizeof (cl_mem), &buffer1);
@@ -211,7 +200,7 @@ int main(int argc, char* argv[])
 
     // buffer3 for params
     int params[5];
-    params[0] = decoder.dedup_len;
+    params[0] = dedup_len;
     params[1] = 0;
 
     // work on each prefix
@@ -241,8 +230,8 @@ int main(int argc, char* argv[])
             0, nullptr, nullptr));
     	clReleaseMemObject (buffer3);
 
-        printf("\033[1A%d/%d @%lds - searching %lu%%...\n", params[1], decoder.dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
-        if (params[1] == decoder.dedup_len)
+        printf("\033[1A%d/%d @%lds - searching %lu%%...\n", params[1], dedup_len, time(NULL) - start, (i+1)*100/ PREFIX_SIZE);
+        if (params[1] == dedup_len)
         {
             break;
         }
@@ -250,12 +239,12 @@ int main(int argc, char* argv[])
     printf("total %d hashes are decoded\n", params[1]);
 
     // read results
-    MobileData* p_m_data = (MobileData*)calloc(decoder.dedup_len, sizeof(MobileData));
+    MobileData* p_m_data = (MobileData*)calloc(dedup_len, sizeof(MobileData));
     CheckCLError (clEnqueueReadBuffer (queue, buffer1, CL_TRUE, 0,
-        decoder.dedup_len * sizeof(MobileData),
+        dedup_len * sizeof(MobileData),
         p_m_data,
         0, nullptr, nullptr));
-    decoder.resort_data(p_m_data);
+    decoder.update_result(p_m_data);
     free(p_m_data);
     p_m_data = 0;
 

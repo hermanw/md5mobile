@@ -29,52 +29,45 @@ void Decoder::hex_to_bytes(uint8_t *to, const char *from, int len)
 
 void Decoder::update_hash(const char *a_hash_string, int index)
 {
-    memcpy(hash_string[index], a_hash_string, HASH_LEN);
-    hex_to_bytes((uint8_t *)(s_hash[index].hash.value), a_hash_string, HASH_LEN);
-    s_hash[index].index = index;
+    hash_string.push_back(std::string(a_hash_string));
+    SortedHash sh;
+    sh.index = index;
+    hex_to_bytes((uint8_t *)(sh.hash.value), a_hash_string, HASH_LEN);
+    s_hash.push_back(sh);
 }
 
-int Decoder::parse_hash_strings(bool is_update, const char *s)
+void Decoder::parse_hash_strings(const char *s)
 {
     int valid_digit_num = 0;
     int count = 0;
-    char a_hash_string[HASH_LEN];
+    char a_hash_string[HASH_LEN + 1] = {0};
     while (*s)
     {
         if (*s == ',')
         {
             if (valid_digit_num == HASH_LEN)
             {
-                if (is_update)
-                {
-                    update_hash(a_hash_string, count);
-                }
+                update_hash(a_hash_string, count);
                 count++;
             }
             valid_digit_num = 0;
         }
         else if (is_valid_digit(*s))
         {
-            if (is_update)
-            {
-                a_hash_string[valid_digit_num] = *s;
-            }
+            a_hash_string[valid_digit_num] = *s;
             valid_digit_num++;
         }
         s++;
     }
     if (valid_digit_num == HASH_LEN)
     {
-        if (is_update)
-        {
-            update_hash(a_hash_string, count);
-        }
+        update_hash(a_hash_string, count);
         count++;
     }
-    return count;
+    hash_len = count;
 }
 
-int Decoder::compare_hash(const uint32_t *a, const uint32_t *b)
+int Decoder::compare_hash_binary(const uint32_t *a, const uint32_t *b)
 {
     for (int i = 0; i < STATE_LEN; i++)
     {
@@ -91,28 +84,9 @@ int Decoder::compare_hash(const uint32_t *a, const uint32_t *b)
     return 0;
 }
 
-void Decoder::quick_sort(SortedHash *array, int from, int to)
+bool Decoder::compare_hash(SortedHash &a, SortedHash &b)
 {
-    if (from >= to)
-        return;
-    SortedHash temp;
-    int i = from, j;
-    for (j = from + 1; j <= to; j++)
-    {
-        if (compare_hash(array[j].hash.value, array[from].hash.value) < 0)
-        {
-            i = i + 1;
-            temp = array[i];
-            array[i] = array[j];
-            array[j] = temp;
-        }
-    }
-
-    temp = array[i];
-    array[i] = array[from];
-    array[from] = temp;
-    quick_sort(array, from, i - 1);
-    quick_sort(array, i + 1, to);
+    return compare_hash_binary(a.hash.value, b.hash.value) < 0;
 }
 
 void Decoder::dedup_sorted_hash()
@@ -120,7 +94,7 @@ void Decoder::dedup_sorted_hash()
     dedup_len = hash_len;
     for (int i = 1; i < dedup_len; i++)
     {
-        if (compare_hash(s_hash[i].hash.value, s_hash[i - 1].hash.value) == 0)
+        if (compare_hash_binary(s_hash[i].hash.value, s_hash[i - 1].hash.value) == 0)
         {
             SortedHash temp = s_hash[i];
             temp.index_dup = s_hash[i - 1].index;
@@ -135,14 +109,28 @@ void Decoder::dedup_sorted_hash()
     }
 }
 
-void Decoder::resort_data(MobileData *p_m_data)
+Hash *Decoder::create_hash_buffer()
 {
+    Hash *p_hash = new Hash[dedup_len];
+    for (int i = 0; i < dedup_len; i++)
+    {
+        p_hash[i] = s_hash[i].hash;
+    }
+    return p_hash;
+}
+
+void Decoder::update_result(MobileData *p_m_data)
+{
+    m_data.resize(hash_len);
     for (int i = 0; i < hash_len; i++)
     {
         int index = s_hash[i].index;
         if (i < dedup_len)
         {
-            m_data[index] = p_m_data[i];
+            for (int j = 0; j < MOBILE_LEN; j++)
+            {
+                m_data[index] += p_m_data[i].value[j];
+            }
         }
         else
         {
@@ -152,23 +140,20 @@ void Decoder::resort_data(MobileData *p_m_data)
     }
 }
 
-Decoder::Decoder(const char *s)
+void Decoder::get_result(std::string& result)
 {
-    hash_len = parse_hash_strings(false, s);
-    hash_string = (HashString *)calloc(hash_len, sizeof(HashString));
-    s_hash = (SortedHash *)calloc(hash_len, sizeof(SortedHash));
-    parse_hash_strings(true, s);
-    quick_sort(s_hash, 0, hash_len - 1);
-    dedup_sorted_hash();
-    m_data = (MobileData *)calloc(hash_len, sizeof(MobileData));
+    for (int h = 0; h < hash_len; h++)
+    {
+        result += hash_string[h];
+        result += ',';
+        result += m_data[h];
+        result += '\n';
+    }
 }
 
-Decoder::~Decoder()
+Decoder::Decoder(const char *s)
 {
-    free(hash_string);
-    hash_string = 0;
-    free(s_hash);
-    s_hash = 0;
-    free(m_data);
-    m_data = 0;
+    parse_hash_strings(s);
+    std::sort(s_hash.begin(), s_hash.end(), compare_hash);
+    dedup_sorted_hash();
 }

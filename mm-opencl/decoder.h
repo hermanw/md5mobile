@@ -1,13 +1,10 @@
-#include <stdlib.h>
-#include <stdint.h>
-#include <string.h>
+#include <vector>
+#include <string>
 
 #define HASH_LEN 32
 #define MOBILE_LEN 11
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
-
-typedef char HashString[HASH_LEN];
 
 typedef struct
 {
@@ -28,25 +25,28 @@ typedef struct
 
 class Decoder
 {
-public:
+private:
     int hash_len;
     int dedup_len;
-    HashString *hash_string;
-    SortedHash *s_hash;
-    MobileData *m_data;
+    std::vector<std::string> hash_string;
+    std::vector<SortedHash> s_hash;
+    std::vector<std::string> m_data;
 
 public:
     Decoder(const char *s);
-    ~Decoder();
-    void resort_data(MobileData *p_m_data);
+    int get_hash_len() const { return hash_len; }
+    int get_dedup_len() const { return dedup_len; }
+    Hash *create_hash_buffer();
+    void update_result(MobileData *p_m_data);
+    void get_result(std::string& result);
 
 private:
     int is_valid_digit(const char c);
     char hexToNibble(char n);
     void hex_to_bytes(uint8_t *to, const char *from, int len);
     void update_hash(const char *hash_string, int index);
-    int parse_hash_strings(bool is_update, const char *s);
-    int compare_hash(const uint32_t *a, const uint32_t *b);
-    void quick_sort(SortedHash *array, int from, int to);
+    void parse_hash_strings(const char *s);
+    static int compare_hash_binary(const uint32_t *a, const uint32_t *b);
+    static bool compare_hash(SortedHash &a, SortedHash &b);
     void dedup_sorted_hash();
 };
