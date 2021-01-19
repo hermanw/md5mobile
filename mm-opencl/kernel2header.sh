@@ -1,3 +1,3 @@
-echo "static const char *const compute_cl = R\"(" > mm.h
-cat kernels/compute.cl >> mm.h
-echo ")\";" >> mm.h
+echo "static const char *const compute_cl = R\"(" > compute_cl.h
+cat kernels/compute.cl >> compute_cl.h
+echo ")\";" >> compute_cl.h

@@ -1,3 +1,6 @@
+#ifndef __DECODER_H
+#define __DECODER_H
+
 #include <vector>
 #include <string>
 
@@ -26,18 +29,18 @@ typedef struct
 class Decoder
 {
 private:
-    int hash_len;
-    int dedup_len;
-    std::vector<std::string> hash_string;
-    std::vector<SortedHash> s_hash;
+    int m_hash_len;
+    int m_dedup_len;
+    std::vector<std::string> m_hash_string;
+    std::vector<SortedHash> m_hash;
     std::vector<std::string> m_data;
 
 public:
     Decoder(const char *s);
-    int get_hash_len() const { return hash_len; }
-    int get_dedup_len() const { return dedup_len; }
+    int get_hash_len() const { return m_hash_len; }
+    int get_dedup_len() const { return m_dedup_len; }
     Hash *create_hash_buffer();
-    void update_result(MobileData *p_m_data);
+    void update_result(MobileData *p_data);
     void get_result(std::string& result);
 
 private:
@@ -50,3 +53,5 @@ private:
     static bool compare_hash(SortedHash &a, SortedHash &b);
     void dedup_sorted_hash();
 };
+
+#endif
