@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "decoder.h"
 
 int Decoder::is_valid_digit(const char c)
