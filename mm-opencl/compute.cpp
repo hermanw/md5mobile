@@ -1,5 +1,6 @@
 #include <iostream>
 #include <chrono>
+#include <cstring>
 
 #include "compute.h"
 #include "compute_cl.h"
@@ -122,7 +123,7 @@ void Compute::set_device(int platform_index, int device_index)
     kernel = clCreateKernel(program, "compute", &error);
     CheckCLError(error);
 
-    queue = clCreateCommandQueue(context, deviceIds[device_index],
+    queue = clCreateCommandQueueWithProperties(context, deviceIds[device_index],
                                  0, &error);
     CheckCLError(error);
 }
@@ -232,7 +233,7 @@ void Compute::benchmark(int &platform_index, int &device_index)
             params[1] = 0;
             params[2] = '1';
             params[3] = '8';
-            params[4] = '6';
+            params[4] = '8';
 
             run(params);
 

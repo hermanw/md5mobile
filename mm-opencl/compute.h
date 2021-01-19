@@ -1,6 +1,8 @@
 #include <vector>
 #include <string>
 
+#define CL_TARGET_OPENCL_VERSION 200
+
 #ifdef __APPLE__
 #include "OpenCL/opencl.h"
 #else
