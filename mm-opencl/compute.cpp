@@ -22,6 +22,13 @@ Compute::Compute()
 
 Compute::~Compute()
 {
+    for (auto device: platforms.devices)
+    {
+        if (device.ids)
+            delete[] device.ids;
+    }
+    if (platforms.ids)
+            delete[] platforms.ids;
 }
 
 void Compute::enum_devices()
@@ -122,9 +129,13 @@ void Compute::set_device(int platform_index, int device_index)
 
     kernel = clCreateKernel(program, "compute", &error);
     CheckCLError(error);
-
+#ifdef __APPLE__
+    queue = clCreateCommandQueue(context, deviceIds[device_index],
+                                 0, &error);
+#else
     queue = clCreateCommandQueueWithProperties(context, deviceIds[device_index],
                                  0, &error);
+#endif
     CheckCLError(error);
 }
 

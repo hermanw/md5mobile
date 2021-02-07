@@ -9,9 +9,23 @@
 #include "CL/cl.h"
 #endif
 
-#include "devices.h"
-#include "platforms.h"
 #include "decoder.h"
+
+typedef struct
+{
+    cl_uint count;
+    cl_device_id *ids;
+    std::vector<std::string> names;
+    std::vector<long> scores;
+} Devices;
+
+typedef struct
+{
+    cl_uint count;
+    cl_platform_id *ids;
+    std::vector<std::string> names;
+    std::vector<Devices> devices;
+} Platforms;
 
 class Compute
 {
@@ -33,10 +47,10 @@ public:
     void enum_devices();
     void print_info();
     void set_device(int platform_index, int device_index);
-    const std::string& get_device_name(int platform_index, int device_index) const;
+    const std::string &get_device_name(int platform_index, int device_index) const;
     void set_hash_buffer(Hash *p_hash, int dedup_len);
     void run(int params[5]);
-    MobileData* read_results(int dedup_len);
+    MobileData *read_results(int dedup_len);
     void release_instance();
     void benchmark(int &platform_index, int &device_index);
 };
