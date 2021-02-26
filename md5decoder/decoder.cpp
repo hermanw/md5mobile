@@ -1,9 +1,12 @@
 #include <iostream>
 #include <algorithm>
+#include <chrono>
 #include "decoder.h"
 
 Decoder::Decoder(const char *cfg_filename, const char *cfg_name)
 {
+    m_benchmark = false;
+    m_kernel_score = 0;
     m_cfg = new Cfg(cfg_filename, cfg_name);
     Kernel::enum_devices(m_platforms);
 }
@@ -222,7 +225,7 @@ bool Decoder::run_in_kernel(Kernel *kernel, int* params)
             char c = char(params[i]);
             std::cout << (c ? c : '*');
         }
-        std::cout << ", " << m_iterations * 100 / m_iterations_len << "%...\n";
+        std::cout << ", " << m_iterations * 100 / m_iterations_len << "%\n";
     }
 
     return (params[1] == m_dedup_len);
@@ -323,6 +326,7 @@ void Decoder::benchmark(int &platform_index, int &device_index)
         {
             std::cout << "\tdevice " << j << ": " << devices.names[j];
             std::cout.flush();
+            m_kernel_score = 0;
             decode(i,j);
             std::cout << ", score(" << m_kernel_score << ")\n";
             if(m_kernel_score < top_score)
