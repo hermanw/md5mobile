@@ -35,6 +35,7 @@ private:
     cl_mem data_buffer;
     cl_mem helper_buffer;
     cl_mem params_buffer;
+    cl_mem input_buffer;
 
 public:
     Kernel();
@@ -46,7 +47,8 @@ public:
     void create_hash_buffer(void *p, int len);
     void create_data_buffer(int len);
     void create_helper_buffer(void *p, int len);
-    void create_params_buffer(int len);
-    void run(int* params, int length, size_t kernel_work_size[3]);
+    void create_params_buffer(void *p, int len);
+    void create_input_buffer(int len);
+    int run(void* input, int length, size_t kernel_work_size[3]);
     void read_results(void* p_data, int length);
 };

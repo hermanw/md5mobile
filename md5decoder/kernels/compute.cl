@@ -1,7 +1,6 @@
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
 #define LENGTH_SIZE 8 // In bytes
-#define PARAM_OFFSET 12
 
 typedef unsigned char uint8_t;
 typedef unsigned int uint32_t;
@@ -148,11 +147,12 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
 }
 
 __kernel void compute(__global Hash* p_hash,
-    __global uint8_t *p_data,
-    __global uint8_t *p_helper,
-    __global int *params)
+    __global uint8_t* p_data,
+    __global uint8_t* p_helper,
+    __global int* params,
+    __global uint8_t* input)
 {
-    if(params[1] >= params[0]) return;
+    if(params[0] >= params[1]) return;
 
     uint8_t data[BLOCK_LEN]= {0};
     uint32_t hash[STATE_LEN] = {0x67452301UL, 0xEFCDAB89UL, 0x98BADCFEUL, 0x10325476UL};
@@ -162,7 +162,7 @@ __kernel void compute(__global Hash* p_hash,
     data[data_length] = 0x80;
     data[BLOCK_LEN - LENGTH_SIZE] = (uint8_t)(data_length << 3);
     for (int i = 0; i < data_length; i++) {
-        data[i] = (uint8_t)params[i + PARAM_OFFSET];
+        data[i] = input[i];
     }
     // TODO: only support digit type for now
     int index = params[3];
@@ -189,10 +189,10 @@ __kernel void compute(__global Hash* p_hash,
     }
     md5_compress(hash, data);
 
-    int hash_index = binary_search(p_hash, params[0], hash);
+    int hash_index = binary_search(p_hash, params[1], hash);
     if (hash_index >= 0)
     {
-        atomic_inc(params + 1);
+        atomic_inc(params);
         int offset = hash_index * data_length;
         for (int j = 0; j < data_length; j++)
         {

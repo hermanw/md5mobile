@@ -159,21 +159,30 @@ void Kernel::create_helper_buffer(void *p, int len)
     CheckCLError(error);
     clSetKernelArg(kernel, 2, sizeof(cl_mem), &helper_buffer);
 }
-void Kernel::create_params_buffer(int len)
+void Kernel::create_params_buffer(void *p, int len)
 {
     cl_int error = CL_SUCCESS;
-    params_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE,
-                                 len,
-                                 0, &error);
+    params_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+                                len,
+                                p, &error);
     CheckCLError(error);
     clSetKernelArg(kernel, 3, sizeof(cl_mem), &params_buffer);
 }
-
-void Kernel::run(int *params, int length, size_t kernel_work_size[3])
+void Kernel::create_input_buffer(int len)
 {
-    CheckCLError(clEnqueueWriteBuffer(queue, params_buffer, CL_TRUE, 0,
-                                        sizeof(int) * length,
-                                        params,
+    cl_int error = CL_SUCCESS;
+    input_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE,
+                                 len,
+                                 0, &error);
+    CheckCLError(error);
+    clSetKernelArg(kernel, 4, sizeof(cl_mem), &input_buffer);
+}
+
+int Kernel::run(void *input, int length, size_t kernel_work_size[3])
+{
+    CheckCLError(clEnqueueWriteBuffer(queue, input_buffer, CL_TRUE, 0,
+                                        length,
+                                        input,
                                         0, nullptr, nullptr));
 
     CheckCLError(clEnqueueNDRangeKernel(queue, kernel, 3,
@@ -182,10 +191,12 @@ void Kernel::run(int *params, int length, size_t kernel_work_size[3])
                                         nullptr,
                                         0, nullptr, nullptr));
 
+    int count = 0;
     CheckCLError(clEnqueueReadBuffer(queue, params_buffer, CL_TRUE, 0,
-                                        sizeof(int) * length,
-                                        params,
+                                        sizeof(int),
+                                        &count,
                                         0, nullptr, nullptr));
+    return count;
 }
 
 void Kernel::read_results(void *p_data, int length)

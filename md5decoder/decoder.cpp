@@ -175,13 +175,13 @@ void Decoder::set_hash_string(const char *s)
     dedup_sorted_hash();
 }
 
-bool Decoder::run_in_host(Kernel *kernel, int* params, int index)
+bool Decoder::run_in_host(Kernel *kernel, uint8_t* input, int index)
 {
     int ds_size = m_cfg->cpu_sections.size();
     // done
     if (index >= ds_size)
     {
-        return run_in_kernel(kernel, params);
+        return run_in_kernel(kernel, input);
     }
     // fill host data and go to next section
     auto &ds = m_cfg->cpu_sections[index];
@@ -190,9 +190,9 @@ bool Decoder::run_in_host(Kernel *kernel, int* params, int index)
     {
         for (int i = 0; i < s.size(); i++)
         {
-            params[PARAM_OFFSET + i + ds.index] = s[i];
+            input[i + ds.index] = s[i];
         }
-        if(run_in_host(kernel, params, index + 1))
+        if(run_in_host(kernel, input, index + 1))
         {
             return true;
         }
@@ -201,12 +201,12 @@ bool Decoder::run_in_host(Kernel *kernel, int* params, int index)
     return false;
 }
 
-bool Decoder::run_in_kernel(Kernel *kernel, int* params)
+bool Decoder::run_in_kernel(Kernel *kernel, uint8_t* input)
 {
-    int length = m_cfg->length + PARAM_OFFSET;
+    int length = m_cfg->length;
     
     auto start = std::chrono::steady_clock::now();
-    kernel->run(params, length, m_cfg->kernel_work_size);
+    int count = kernel->run(input, length, m_cfg->kernel_work_size);
     if (m_benchmark)
     {
         auto end = std::chrono::steady_clock::now();
@@ -219,16 +219,16 @@ bool Decoder::run_in_kernel(Kernel *kernel, int* params)
     else
     {
         m_iterations++;
-        std::cout << "\033[1A" << params[1] << "/" << m_dedup_len << " @" << time(NULL) - m_start << "s - searching " ;
-        for(int i = PARAM_OFFSET; i < length; i++)
+        std::cout << "\033[1A" << count << "/" << m_dedup_len << " @" << time(NULL) - m_start << "s - searching " ;
+        for(int i = 0; i < length; i++)
         {
-            char c = char(params[i]);
+            char c = input[i];
             std::cout << (c ? c : '*');
         }
         std::cout << ", " << m_iterations * 100 / m_iterations_len << "%\n";
     }
 
-    return (params[1] == m_dedup_len);
+    return (count == m_dedup_len);
 }
 
 void Decoder::decode(int platform_index, int device_index)
@@ -258,13 +258,11 @@ void Decoder::decode(int platform_index, int device_index)
     }
     kernel->create_helper_buffer(p_numbers, 10000*4);
     delete[] p_numbers;
-    // params buffer
-    int params_length = data_length + PARAM_OFFSET;
-    kernel->create_params_buffer(params_length * sizeof(int));
-    
+
+    // params buffer    
     // params
-    // 0 : hash count
-    // 1 : decode count
+    // 0 : decode count
+    // 1 : hash count
     // 2 : data length
     // 3 : x index 
     // 4 : x length
@@ -275,9 +273,9 @@ void Decoder::decode(int platform_index, int device_index)
     // 9 : z index 
     // 10 : z length
     // 11 : z type
-    auto params = new int[params_length]();
-    params[0] = m_dedup_len;
-    params[1] = 0;
+    auto params = new int[PARAM_LEN];
+    params[0] = 0;
+    params[1] = m_dedup_len;
     params[2] = data_length;
     int offset = 3;
     for(auto &ds: m_cfg->gpu_sections)
@@ -287,6 +285,11 @@ void Decoder::decode(int platform_index, int device_index)
         params[offset + 2] = ds.type;
         offset += 3;
     }
+    kernel->create_params_buffer(params, PARAM_LEN * sizeof(int));
+    delete[] params;
+
+    // input buffer
+    kernel->create_input_buffer(data_length);
 
     if (!m_benchmark)
     {
@@ -299,12 +302,13 @@ void Decoder::decode(int platform_index, int device_index)
     {
         m_iterations_len *= m_cfg->sources[ds.source].size();
     }
-    run_in_host(kernel, params,0);
+    auto input = new uint8_t[data_length]();
+    run_in_host(kernel, input,0);
+    delete[] input;
     if (!m_benchmark)
     {
-        std::cout << "total " << params[1] << " hashes are decoded\n";
+        // std::cout << "total " << *(p+1) << " hashes are decoded\n";
     }
-    delete[] params;
 
     // read results
     int result_length = m_dedup_len * data_length;

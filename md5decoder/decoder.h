@@ -9,7 +9,7 @@
 #define HASH_LEN 32
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 4  // In words
-#define PARAM_OFFSET 12
+#define PARAM_LEN 12
 
 typedef struct
 {
@@ -60,8 +60,8 @@ private:
     static int compare_hash_binary(const uint32_t *a, const uint32_t *b);
     static bool compare_hash(SortedHash &a, SortedHash &b);
     void dedup_sorted_hash();
-    bool run_in_host(Kernel *kernel, int *params, int index);
-    bool run_in_kernel(Kernel *kernel, int *params);
+    bool run_in_host(Kernel *kernel, uint8_t *params, int index);
+    bool run_in_kernel(Kernel *kernel, uint8_t *params);
 };
 
 #endif
