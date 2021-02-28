@@ -25,6 +25,7 @@ Kernel::~Kernel()
     clReleaseMemObject(data_buffer);
     clReleaseMemObject(helper_buffer);
     clReleaseMemObject(params_buffer);
+    clReleaseMemObject(input_buffer);
 
     clReleaseCommandQueue(queue);
     clReleaseKernel(kernel);

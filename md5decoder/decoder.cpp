@@ -245,19 +245,46 @@ void Decoder::decode(int platform_index, int device_index)
     Hash *p_hash = create_hash_buffer();
     kernel->create_hash_buffer(p_hash, m_dedup_len * sizeof(Hash));
     delete[] p_hash;
+
     // data buffer
     kernel->create_data_buffer(m_dedup_len * sizeof(char) * data_length);
+
     // helper buffer
-    char *p_numbers = new char[10000 * 4];
+    // assume at most one gpu list section for now
+    int listds_length = 0;
+    std::string listds_source;
+    for(auto& ds : m_cfg->gpu_sections)
+    {
+        if(ds.type == ds_type_list)
+        {
+            listds_length = ds.length;
+            listds_source = ds.source;
+            break;
+        }
+    }
+    long list_length = listds_length * m_cfg->sources[listds_source].size();
+    long numbers_length = 10000 * 4;
+    char* p_helper = new char[numbers_length + list_length];
     for (size_t i = 0; i < 10000; i++)
     {
-        p_numbers[i * 4 + 0] = i / 1000 + '0';
-        p_numbers[i * 4 + 1] = i / 100 % 10 + '0';
-        p_numbers[i * 4 + 2] = i / 10 % 10 + '0';
-        p_numbers[i * 4 + 3] = i % 10 + '0';
+        p_helper[i * 4 + 0] = i / 1000 + '0';
+        p_helper[i * 4 + 1] = i / 100 % 10 + '0';
+        p_helper[i * 4 + 2] = i / 10 % 10 + '0';
+        p_helper[i * 4 + 3] = i % 10 + '0';
     }
-    kernel->create_helper_buffer(p_numbers, 10000*4);
-    delete[] p_numbers;
+    if (list_length > 0)
+    {
+        long offset = numbers_length;
+        for(auto& s : m_cfg->sources[listds_source])
+        {
+            for(int i = 0; i < listds_length; i++)
+            {
+                p_helper[offset++] = s[i];
+            }
+        }
+    }
+    kernel->create_helper_buffer(p_helper, numbers_length + list_length);
+    delete[] p_helper;
 
     // params buffer    
     // params
@@ -303,12 +330,12 @@ void Decoder::decode(int platform_index, int device_index)
         m_iterations_len *= m_cfg->sources[ds.source].size();
     }
     auto input = new uint8_t[data_length]();
-    run_in_host(kernel, input,0);
+    run_in_host(kernel, input, 0);
     delete[] input;
-    if (!m_benchmark)
-    {
-        // std::cout << "total " << *(p+1) << " hashes are decoded\n";
-    }
+    // if (!m_benchmark)
+    // {
+    //     std::cout << "total " << *(p+1) << " hashes are decoded\n";
+    // }
 
     // read results
     int result_length = m_dedup_len * data_length;

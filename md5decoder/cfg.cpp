@@ -19,6 +19,16 @@ Cfg::Cfg(const char *filename, const char *cfg_name)
     auto j = json::parse(stream.str())[cfg_name];
     // length
     length = j["length"];
+    // sources
+    for (auto &item : j["sources"].items())
+    {
+        std::vector<std::string> list;
+        for (auto &l : item.value())
+        {
+            list.push_back(l);
+        }
+        sources[item.key()] = list;
+    }
     // cpu_sections
     for (auto &item : j["cpu_sections"].items())
     {
@@ -33,17 +43,14 @@ Cfg::Cfg(const char *filename, const char *cfg_name)
         DataSection ds;
         set_data_section(ds, item.value());
         gpu_sections.push_back(ds);
-        kernel_work_size[kernel_index++] = pow(10, ds.length);
-    }
-    // sources
-    for (auto &item : j["sources"].items())
-    {
-        std::vector<std::string> list;
-        for (auto &l : item.value())
+        if(ds.type == ds_type_digit)
         {
-            list.push_back(l);
+            kernel_work_size[kernel_index++] = pow(10, ds.length);
         }
-        sources[item.key()] = list;
+        else if (ds.type == ds_type_list)
+        {
+            kernel_work_size[kernel_index++] = sources[ds.source].size();
+        }
     }
 }
 
