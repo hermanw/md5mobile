@@ -1,43 +1,32 @@
 static const char *const compute_cl = R"(
 #define BLOCK_LEN 64 // In bytes
-#define STATE_LEN 4  // In words
 #define LENGTH_SIZE 8 // In bytes
 
-typedef unsigned char uint8_t;
-typedef unsigned int uint32_t;
-
-typedef struct
+static int compare_hash(uint4* a, uint4* b)
 {
-    uint32_t value[STATE_LEN];
-} Hash;
-
-static int compare_hash(__global const uint32_t* a, const uint32_t* b)
-{
-    for (int i = 0; i < STATE_LEN; i++)
-    {
-        if (a[i] < b[i])
-        {
-            return -1;
-        }
-        else if (a[i] > b[i])
-        {
-            return 1;
-        }        
-    }
-
+    if(a->x < b->x) return -1;
+    if(a->x > b->x) return 1;
+    if(a->y < b->y) return -1;
+    if(a->y > b->y) return 1;
+    if(a->z < b->z) return -1;
+    if(a->z > b->z) return 1;
+    if(a->w < b->w) return -1;
+    if(a->w > b->w) return 1;
     return 0;
 }
 
-static int binary_search(__global const Hash* p_hash, int len, const uint32_t* hash)
+static bool binary_search(__global const uint4* p_hash, int len, uint4* bhash, uint* index)
 {
     int low = 0, high = len - 1, mid;
     while (low <= high)
     {
         mid = (low + high) / 2;
-        int r = compare_hash(p_hash[mid].value, hash);
+        uint4 ahash = p_hash[mid];
+        int r = compare_hash(&ahash, bhash);
         if (r == 0)
         {
-            return mid;
+            *index = (uint)mid;
+            return true;
         }
         else if (r < 0)
         {
@@ -48,10 +37,10 @@ static int binary_search(__global const Hash* p_hash, int len, const uint32_t* h
             high = mid - 1;
         }
     }
-    return -1;
+    return false;
 }
 
-static void md5_compress(uint32_t state[4], const uint8_t block[64])
+static void md5_compress(uint4* state, const uchar block[64])
 {
     unsigned int schedule[16];
     schedule[0] = (unsigned int)block[0 * 4 + 0] << 0 | (unsigned int)block[0 * 4 + 1] << 8 | (unsigned int)block[0 * 4 + 2] << 16 | (unsigned int)block[0 * 4 + 3] << 24;
@@ -71,10 +60,10 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
     schedule[14] = (unsigned int)block[14 * 4 + 0] << 0 | (unsigned int)block[14 * 4 + 1] << 8 | (unsigned int)block[14 * 4 + 2] << 16 | (unsigned int)block[14 * 4 + 3] << 24;
     schedule[15] = (unsigned int)block[15 * 4 + 0] << 0 | (unsigned int)block[15 * 4 + 1] << 8 | (unsigned int)block[15 * 4 + 2] << 16 | (unsigned int)block[15 * 4 + 3] << 24;
 
-    unsigned int a = state[0];
-    unsigned int b = state[1];
-    unsigned int c = state[2];
-    unsigned int d = state[3];
+    unsigned int a = state->s0;
+    unsigned int b = state->s1;
+    unsigned int c = state->s2;
+    unsigned int d = state->s3;
 
     a = a + (d ^ (b & (c ^ d))) + (0xD76AA478U) + schedule[0]; a = b + ((((a)) << (7)) | ((a) >> (32 - (7))));
     d = d + (c ^ (a & (b ^ c))) + (0xE8C7B756U) + schedule[1]; d = a + ((((d)) << (12)) | ((d) >> (32 - (12))));
@@ -141,63 +130,63 @@ static void md5_compress(uint32_t state[4], const uint8_t block[64])
     c = c + (a ^ (d | ~b)) + (0x2AD7D2BBU) + schedule[2]; c = d + ((((c)) << (15)) | ((c) >> (32 - (15))));
     b = b + (d ^ (c | ~a)) + (0xEB86D391U) + schedule[9]; b = c + ((((b)) << (21)) | ((b) >> (32 - (21))));
 
-    state[0] = state[0] + a;
-    state[1] = state[1] + b;
-    state[2] = state[2] + c;
-    state[3] = state[3] + d;
+    state->s0 += a;
+    state->s1 += b;
+    state->s2 += c;
+    state->s3 += d;
 }
 
-static void fill_data(uint8_t* data, __global uint8_t* p_helper, int global_id, int index, int length, int type)
+static void fill_data(uchar* data, __global uchar* p_helper, uint global_id, uint index, uint length, uint type)
 {
     if (length == 0) return;
 
     if (type == 0) // ds_type_list
     {
-        int offset = 40000 + global_id * length;
-        for (int i = 0; i < length; i++)
+        uint offset = 40000 + global_id * length;
+        for (uint i = 0; i < length; i++)
         {
             data[index + i] = p_helper[offset + i];
         }
     }
     else if (type == 1) // ds_type_digit
     {
-        int offset = (global_id << 2) + 4 - length;
-        for (int i = 0; i < length; i++) {
+        uint offset = (global_id << 2) + 4 - length;
+        for (uint i = 0; i < length; i++) {
             data[index + i] = p_helper[offset + i];
         }
     }
 }
 
-__kernel void compute(__global Hash* p_hash,
-    __global uint8_t* p_data,
-    __global uint8_t* p_helper,
-    __global int* params,
-    __global uint8_t* input)
+__kernel void compute(__global uint4* p_hash,
+    __global uchar* p_data,
+    __global uchar* p_helper,
+    __global uint* params,
+    __global uchar* input)
 {
     if(params[0] >= params[1]) return;
 
-    uint8_t data[BLOCK_LEN]= {0};
-    uint32_t hash[STATE_LEN] = {0x67452301UL, 0xEFCDAB89UL, 0x98BADCFEUL, 0x10325476UL};
+    uchar data[BLOCK_LEN]= {0};
+    uint4 hash = (uint4)(0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476);
 
     // fill data
-    int data_length = params[2];
+    uint data_length = params[2];
     data[data_length] = 0x80;
-    data[BLOCK_LEN - LENGTH_SIZE] = (uint8_t)(data_length << 3);
-    for (int i = 0; i < data_length; i++) {
+    data[BLOCK_LEN - LENGTH_SIZE] = (uchar)(data_length << 3);
+    for (uint i = 0; i < data_length; i++) {
         data[i] = input[i];
     }
     fill_data(data, p_helper, get_global_id(0), params[3], params[4], params[5]);
     fill_data(data, p_helper, get_global_id(1), params[6], params[7], params[8]);
     fill_data(data, p_helper, get_global_id(2), params[9], params[10], params[11]);
 
-    md5_compress(hash, data);
+    md5_compress(&hash, data);
 
-    int hash_index = binary_search(p_hash, params[1], hash);
-    if (hash_index >= 0)
+    uint hash_index = 0;
+    if (binary_search(p_hash, (int)params[1], &hash, &hash_index))
     {
         atomic_inc(params);
-        int offset = hash_index * data_length;
-        for (int j = 0; j < data_length; j++)
+        uint offset = hash_index * data_length;
+        for (uint j = 0; j < data_length; j++)
         {
             p_data[offset + j] = data[j];
         }
