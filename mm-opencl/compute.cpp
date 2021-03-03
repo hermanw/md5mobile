@@ -141,6 +141,7 @@ void Compute::set_device(int platform_index, int device_index)
 
 void Compute::release_instance()
 {
+    clReleaseMemObject(buffer3);
     clReleaseMemObject(buffer2);
     clReleaseMemObject(buffer1);
     clReleaseMemObject(buffer0);
@@ -154,10 +155,10 @@ void Compute::release_instance()
 void Compute::set_hash_buffer(Hash *p_hash, int dedup_len)
 {
     cl_int error = CL_SUCCESS;
-    // buffer0 for hash
-    buffer0 = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                             dedup_len * sizeof(Hash),
-                             p_hash, &error);
+    // buffer0 for count
+    buffer0 = clCreateBuffer(context, CL_MEM_READ_WRITE,
+                             sizeof(int),
+                             0, &error);
     CheckCLError(error);
     clSetKernelArg(kernel, 0, sizeof(cl_mem), &buffer0);
 
@@ -168,7 +169,14 @@ void Compute::set_hash_buffer(Hash *p_hash, int dedup_len)
     CheckCLError(error);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &buffer1);
 
-    // buffer2 for number helper strings
+    // buffer2 for hash
+    buffer2 = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+                             dedup_len * sizeof(Hash),
+                             p_hash, &error);
+    CheckCLError(error);
+    clSetKernelArg(kernel, 2, sizeof(cl_mem), &buffer2);
+
+    // buffer3 for number helper strings
     char *p_numbers = new char[10000 * 4];
     for (size_t i = 0; i < 10000; i++)
     {
@@ -177,35 +185,32 @@ void Compute::set_hash_buffer(Hash *p_hash, int dedup_len)
         p_numbers[i * 4 + 2] = i / 10 % 10 + '0';
         p_numbers[i * 4 + 3] = i % 10 + '0';
     }
-    buffer2 = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
+    buffer3 = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
                              10000 * 4,
                              p_numbers, &error);
     CheckCLError(error);
-    clSetKernelArg(kernel, 2, sizeof(cl_mem), &buffer2);
+    clSetKernelArg(kernel, 3, sizeof(cl_mem), &buffer3);
     delete[] p_numbers;
 }
 
-void Compute::run(int params[5])
+int Compute::run(cl_uchar4* prefix, int dedup_len)
 {
-    cl_int error = CL_SUCCESS;
-    cl_mem buffer3 = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                                    sizeof(int) * 5,
-                                    params, &error);
-    CheckCLError(error);
-    clSetKernelArg(kernel, 3, sizeof(cl_mem), &buffer3);
-    // call opencl
-    const size_t globalWorkSize[] = {10000, 10000, 0};
+    clSetKernelArg(kernel, 4, sizeof(int), &dedup_len);
+    clSetKernelArg(kernel, 5, sizeof(cl_uchar4), prefix);
+
+    const size_t globalWorkSize[] = {10000, 10000, 1};
     CheckCLError(clEnqueueNDRangeKernel(queue, kernel, 2,
                                         nullptr,
                                         globalWorkSize,
                                         nullptr,
                                         0, nullptr, nullptr));
 
-    CheckCLError(clEnqueueReadBuffer(queue, buffer3, CL_TRUE, 0,
-                                     sizeof(int) * 5,
-                                     params,
+    int count = 0;
+    CheckCLError(clEnqueueReadBuffer(queue, buffer0, CL_TRUE, 0,
+                                     sizeof(int),
+                                     &count,
                                      0, nullptr, nullptr));
-    clReleaseMemObject(buffer3);
+    return count;
 }
 
 MobileData *Compute::read_results(int dedup_len)
@@ -221,7 +226,7 @@ MobileData *Compute::read_results(int dedup_len)
 
 void Compute::benchmark(int &platform_index, int &device_index)
 {
-    long top_score = 0;
+    long top_score = 100000;
     for (size_t i = 0; i < platforms.count; i++)
     {
         auto& devices = platforms.devices[i];
@@ -231,43 +236,26 @@ void Compute::benchmark(int &platform_index, int &device_index)
             const int hash_len = decoder.get_hash_len();
             const int dedup_len = decoder.get_dedup_len();
 
-            auto start = std::chrono::steady_clock::now();
-
             set_device(i, j);
             Hash *p_hash = decoder.create_hash_buffer();
             set_hash_buffer(p_hash, dedup_len);
             delete[] p_hash;
 
-            // params
-            int params[5];
-            params[0] = dedup_len;
-            params[1] = 0;
-            params[2] = '1';
-            params[3] = '8';
-            params[4] = '8';
+            cl_uchar4 prefix = {'8','8','8',0};
+            auto start = std::chrono::steady_clock::now();
+            run(&prefix, dedup_len);
+            auto end = std::chrono::steady_clock::now();
+            long e = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-            run(params);
-
-            // read results
-            MobileData *p_data = read_results(dedup_len);
-            decoder.update_result(p_data);
-            delete[] p_data;
             release_instance();
 
-            auto end = std::chrono::steady_clock::now();
-            long e = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            long score = 100000000/e;
-            devices.scores[j] = score;
-            if(score > top_score)
+            devices.scores[j] = e;
+            if(e < top_score)
             {
+                top_score = e;
                 platform_index = i;
                 device_index = j;
             }
-
-            // // verify
-            // std::string result;
-            // decoder.get_result(result);
-            // std::cout << result << std::endl;
         }
     }
 }

@@ -68,7 +68,7 @@ void Decoder::parse_hash_strings(const char *s)
     m_hash_len = count;
 }
 
-int Decoder::compare_hash_binary(const uint32_t *a, const uint32_t *b)
+int Decoder::compare_hash_binary(const uint64_t *a, const uint64_t *b)
 {
     for (int i = 0; i < STATE_LEN; i++)
     {

@@ -150,28 +150,24 @@ int main(int argc, char *argv[])
     compute.set_hash_buffer(p_hash, dedup_len);
     delete[] p_hash;
 
-    // params
-    int params[5];
-    params[0] = dedup_len;
-    params[1] = 0;
-
     // work on each prefix
     time_t start = time(NULL);
     std::cout << "starting...\n";
+    int decode_count = 0;
     for (int i = 0; i < PREFIX_SIZE; i++)
     {
-        params[2] = PREFIX_LIST[i] / 100 + '0';
-        params[3] = (PREFIX_LIST[i] / 10) % 10 + '0';
-        params[4] = PREFIX_LIST[i] % 10 + '0';
-
-        compute.run(params);
-        std::cout << "\033[1A" << params[1] << "/" << dedup_len << " @" << time(NULL) - start << "s - searching " << (i + 1) * 100 / PREFIX_SIZE << "%...\n";
-        if (params[1] == dedup_len)
+        cl_uchar4 prefix;
+        prefix.s0 = PREFIX_LIST[i] / 100 + '0';
+        prefix.s1 = (PREFIX_LIST[i] / 10) % 10 + '0';
+        prefix.s2 = PREFIX_LIST[i] % 10 + '0';
+        decode_count = compute.run(&prefix, dedup_len);
+        std::cout << "\033[1A" << decode_count << "/" << dedup_len << " @" << time(NULL) - start << "s - searching " << (i + 1) * 100 / PREFIX_SIZE << "%...\n";
+        if (decode_count == dedup_len)
         {
             break;
         }
     }
-    std::cout << "total " << params[1] << " hashes are decoded\n";
+    std::cout << "total " << decode_count << " hashes are decoded\n";
 
     // read results
     MobileData *p_data = compute.read_results(dedup_len);

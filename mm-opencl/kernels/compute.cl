@@ -3,49 +3,6 @@
 #define LENGTH_SIZE 8 // In bytes
 #define MOBILE_LEN 11
 
-typedef struct
-{
-    uchar value[MOBILE_LEN];
-} MobileData;
-
-static int compare_hash(uint4* a, uint4* b)
-{
-    if(a->x < b->x) return -1;
-    if(a->x > b->x) return 1;
-    if(a->y < b->y) return -1;
-    if(a->y > b->y) return 1;
-    if(a->z < b->z) return -1;
-    if(a->z > b->z) return 1;
-    if(a->w < b->w) return -1;
-    if(a->w > b->w) return 1;
-    return 0;
-}
-
-static bool binary_search(__global const uint4* p_hash, int len, uint4* bhash, uint* index)
-{
-    int low = 0, high = len - 1, mid;
-    while (low <= high)
-    {
-        mid = (low + high) / 2;
-        uint4 ahash = p_hash[mid];
-        int r = compare_hash(&ahash, bhash);
-        if (r == 0)
-        {
-            *index = (uint)mid;
-            return true;
-        }
-        else if (r < 0)
-        {
-            low = mid + 1;
-        }
-        else
-        {
-            high = mid - 1;
-        }
-    }
-    return false;
-}
-
 static void md5_compress(uint4* state, const uchar block[64])
 {
     unsigned int schedule[16];
@@ -142,22 +99,23 @@ static void md5_compress(uint4* state, const uchar block[64])
     state->s3 += d;
 }
 
-__kernel void compute(__global uint4* p_hash,
-    __global MobileData* p_data,
-    __global uchar4* p_numbers,
-    __global uint* params)
+__kernel void compute(
+    __global int* p_count,
+    __global uchar* p_data,
+    __constant ulong2* p_hash,
+    __constant uchar4* p_numbers,
+    int hash_len,
+    uchar4 prefix)
 {
-    if(params[1] >= params[0]) return;
+    if(*p_count >= hash_len) return;
 
+    // data: 64 bytes
     uchar data[BLOCK_LEN]= {0};
-    uint4 hash = (uint4)(0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476);
-
-    // fill mobile digits
     data[MOBILE_LEN] = 0x80;
-    data[BLOCK_LEN - LENGTH_SIZE] = 'X';
-    data[0] = (uchar)params[2];
-    data[1] = (uchar)params[3];
-    data[2] = (uchar)params[4];
+    data[BLOCK_LEN - LENGTH_SIZE] = 88;
+    data[0] = prefix[0];
+    data[1] = prefix[1];
+    data[2] = prefix[2];
     uchar4 number = p_numbers[get_global_id (0)];
     data[3] = number.s0;
     data[4] = number.s1;
@@ -169,15 +127,39 @@ __kernel void compute(__global uint4* p_hash,
     data[9] = number.s2;
     data[10] = number.s3;
 
+    // hash
+    uint4 hash = (uint4)(0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476);
+
     md5_compress(&hash, data);
 
-    uint index = 0;
-    if (binary_search(p_hash, (int)params[0], &hash, &index))
+    ulong2 bhash = as_ulong2(hash);
+    int low = 0;
+    int high = hash_len - 1;
+    do
     {
-        atomic_inc(params+1);
-        for(int j = 0; j < MOBILE_LEN; j++)
+        int mid = (low + high) / 2;
+        ulong2 ahash = p_hash[mid];
+        if(ahash.s0 < bhash.s0)
         {
-            p_data[index].value[j] = data[j];
+            low = mid + 1;
         }
-    }
+        else if (ahash.s0 > bhash.s0)
+        {
+            high = mid - 1;
+        }
+        else
+        {
+            if(ahash.s1 < bhash.s1) {low = mid + 1;}
+            else if (ahash.s1 > bhash.s1) {high = mid - 1;}
+            else
+            {
+                atomic_inc(p_count);
+                for(int j = 0; j < MOBILE_LEN; j++)
+                {
+                    p_data[mid * MOBILE_LEN + j] = data[j];
+                }
+                break;
+            }
+        }
+    } while (low <= high);
 }
