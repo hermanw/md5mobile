@@ -33,8 +33,9 @@ private:
     cl_command_queue queue;
     cl_mem hash_buffer;
     cl_mem data_buffer;
+    cl_mem number_buffer;
     cl_mem helper_buffer;
-    cl_mem params_buffer;
+    cl_mem count_buffer;
     cl_mem input_buffer;
 
 public:
@@ -43,12 +44,8 @@ public:
     static void enum_devices(Platforms &platforms);
     static void release_platforms(Platforms &platforms);
     
-    void set_device(Platforms &platforms, int platform_index, int device_index);
-    void create_hash_buffer(void *p, int len);
-    void create_data_buffer(int len);
-    void create_helper_buffer(void *p, int len);
-    void create_params_buffer(void *p, int len);
-    void create_input_buffer(int len);
-    int run(void* input, int length, size_t kernel_work_size[3]);
+    void set_device(Platforms &platforms, int platform_index, int device_index, const char *options);
+    void create_buffers(void* p_hash, void* p_number, void* p_helper, int hash_length, int data_length,int helper_length);
+    int run(void *input, int hash_length, int data_length, size_t kernel_work_size[3]);
     void read_results(void* p_data, int length);
 };

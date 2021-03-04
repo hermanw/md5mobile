@@ -23,8 +23,9 @@ Kernel::~Kernel()
 {
     clReleaseMemObject(hash_buffer);
     clReleaseMemObject(data_buffer);
+    clReleaseMemObject(number_buffer);
     clReleaseMemObject(helper_buffer);
-    clReleaseMemObject(params_buffer);
+    clReleaseMemObject(count_buffer);
     clReleaseMemObject(input_buffer);
 
     clReleaseCommandQueue(queue);
@@ -99,7 +100,7 @@ void Kernel::release_platforms(Platforms &platforms)
         delete[] platforms.ids;
 }
 
-void Kernel::set_device(Platforms &platforms, int platform_index, int device_index)
+void Kernel::set_device(Platforms &platforms, int platform_index, int device_index, const char *options)
 {
     const cl_context_properties contextProperties[] =
         {
@@ -119,7 +120,7 @@ void Kernel::set_device(Platforms &platforms, int platform_index, int device_ind
     CheckCLError(error);
     // program = CreateProgram("kernels/compute.cl", context);
 
-    CheckCLError(clBuildProgram(program, deviceIdCount, deviceIds, nullptr, nullptr, nullptr));
+    CheckCLError(clBuildProgram(program, deviceIdCount, deviceIds, options, nullptr, nullptr));
 
     kernel = clCreateKernel(program, "compute", &error);
     CheckCLError(error);
@@ -133,56 +134,27 @@ void Kernel::set_device(Platforms &platforms, int platform_index, int device_ind
     CheckCLError(error);
 }
 
-void Kernel::create_hash_buffer(void *p, int len)
+void Kernel::create_buffers(void* p_hash, void* p_number, void* p_helper, int hash_length, int data_length,int helper_length)
 {
-    cl_int error = CL_SUCCESS;
-    hash_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                 len,
-                                 p, &error);
-    CheckCLError(error);
-    clSetKernelArg(kernel, 0, sizeof(cl_mem), &hash_buffer);
-}
-void Kernel::create_data_buffer(int len)
-{
-    cl_int error = CL_SUCCESS;
-    data_buffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY,
-                                 len,
-                                 0, &error);
-    CheckCLError(error);
+    count_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int), 0, 0);
+    clSetKernelArg(kernel, 0, sizeof(cl_mem), &count_buffer);
+    data_buffer = clCreateBuffer(context, CL_MEM_WRITE_ONLY, hash_length * data_length, 0, 0);
     clSetKernelArg(kernel, 1, sizeof(cl_mem), &data_buffer);
-}
-void Kernel::create_helper_buffer(void *p, int len)
-{
-    cl_int error = CL_SUCCESS;
-    helper_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,
-                                   len,
-                                   p, &error);
-    CheckCLError(error);
-    clSetKernelArg(kernel, 2, sizeof(cl_mem), &helper_buffer);
-}
-void Kernel::create_params_buffer(void *p, int len)
-{
-    cl_int error = CL_SUCCESS;
-    params_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                                len,
-                                p, &error);
-    CheckCLError(error);
-    clSetKernelArg(kernel, 3, sizeof(cl_mem), &params_buffer);
-}
-void Kernel::create_input_buffer(int len)
-{
-    cl_int error = CL_SUCCESS;
-    input_buffer = clCreateBuffer(context, CL_MEM_READ_WRITE,
-                                 len,
-                                 0, &error);
-    CheckCLError(error);
-    clSetKernelArg(kernel, 4, sizeof(cl_mem), &input_buffer);
+    hash_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, hash_length * 16, p_hash, 0);
+    clSetKernelArg(kernel, 2, sizeof(cl_mem), &hash_buffer);
+    number_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, 40000, p_number, 0);
+    clSetKernelArg(kernel, 3, sizeof(cl_mem), &number_buffer);
+    helper_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, helper_length, p_helper, 0);
+    clSetKernelArg(kernel, 4, sizeof(cl_mem), &helper_buffer);
+    input_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, data_length, 0, 0);
+    clSetKernelArg(kernel, 5, sizeof(cl_mem), &input_buffer);
 }
 
-int Kernel::run(void *input, int length, size_t kernel_work_size[3])
+int Kernel::run(void *input, int hash_length, int data_length, size_t kernel_work_size[3])
 {
+    clSetKernelArg(kernel, 6, sizeof(int), &hash_length);
     CheckCLError(clEnqueueWriteBuffer(queue, input_buffer, CL_TRUE, 0,
-                                        length,
+                                        data_length,
                                         input,
                                         0, nullptr, nullptr));
 
@@ -193,7 +165,7 @@ int Kernel::run(void *input, int length, size_t kernel_work_size[3])
                                         0, nullptr, nullptr));
 
     int count = 0;
-    CheckCLError(clEnqueueReadBuffer(queue, params_buffer, CL_TRUE, 0,
+    CheckCLError(clEnqueueReadBuffer(queue, count_buffer, CL_TRUE, 0,
                                         sizeof(int),
                                         &count,
                                         0, nullptr, nullptr));

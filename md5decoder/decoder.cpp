@@ -1,4 +1,5 @@
 #include <iostream>
+#include <sstream>
 #include <algorithm>
 #include <chrono>
 #include "decoder.h"
@@ -84,7 +85,7 @@ void Decoder::parse_hash_string(const char *s)
     m_hash_len = count;
 }
 
-int Decoder::compare_hash_binary(const uint32_t *a, const uint32_t *b)
+int Decoder::compare_hash_binary(const uint64_t *a, const uint64_t *b)
 {
     for (int i = 0; i < STATE_LEN; i++)
     {
@@ -203,10 +204,10 @@ bool Decoder::run_in_host(Kernel *kernel, uint8_t* input, int index)
 
 bool Decoder::run_in_kernel(Kernel *kernel, uint8_t* input)
 {
-    int length = m_cfg->length;
+    int data_length = m_cfg->length;
     
     auto start = std::chrono::steady_clock::now();
-    int count = kernel->run(input, length, m_cfg->kernel_work_size);
+    int count = kernel->run(input, m_dedup_len, data_length, m_cfg->kernel_work_size);
     if (m_benchmark)
     {
         auto end = std::chrono::steady_clock::now();
@@ -219,8 +220,11 @@ bool Decoder::run_in_kernel(Kernel *kernel, uint8_t* input)
     else
     {
         m_iterations++;
+        // auto end = std::chrono::steady_clock::now();
+        // auto e = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+        // std::cout << e << std::endl;
         std::cout << "\033[1A" << count << "/" << m_dedup_len << " @" << time(NULL) - m_start << "s - searching " ;
-        for(int i = 0; i < length; i++)
+        for(int i = 0; i < data_length; i++)
         {
             char c = input[i];
             std::cout << (c ? c : '*');
@@ -234,23 +238,37 @@ bool Decoder::run_in_kernel(Kernel *kernel, uint8_t* input)
 void Decoder::decode(int platform_index, int device_index)
 {
     int data_length = m_cfg->length;
+    std::ostringstream options;
+    options << "-D DATA_LENGTH=" << data_length;
+    std::vector<std::string> XYZ = {"X", "Y", "Z"};
+    for(int i = 0; i < m_cfg->gpu_sections.size(); i++)
+    {
+        auto &ds = m_cfg->gpu_sections[i];
+        options << " -D " << XYZ[i] << "_INDEX=" << ds.index;
+        options << " -D " << XYZ[i] << "_LENGTH=" << ds.length;
+        options << " -D " << XYZ[i] << "_TYPE=" << ds.type;
+    }
+
     auto kernel = new Kernel();
-    kernel->set_device(m_platforms, platform_index, device_index);
+    kernel->set_device(m_platforms, platform_index, device_index, options.str().c_str());
     if (!m_benchmark)
     {
         std::cout << "using " << m_platforms.devices[platform_index].names[device_index] << std::endl;
     }
 
-    // hash buffer
+    // build hash buffer
     Hash *p_hash = create_hash_buffer();
-    kernel->create_hash_buffer(p_hash, m_dedup_len * sizeof(Hash));
-    delete[] p_hash;
-
-    // data buffer
-    kernel->create_data_buffer(m_dedup_len * sizeof(char) * data_length);
-
-    // helper buffer
-    // assume at most one gpu list section for now
+    // build number buffer
+    long numbers_length = 10000 * 4;
+    char* p_number = new char[numbers_length];
+    for (size_t i = 0; i < 10000; i++)
+    {
+        p_number[i * 4 + 0] = i / 1000 + '0';
+        p_number[i * 4 + 1] = i / 100 % 10 + '0';
+        p_number[i * 4 + 2] = i / 10 % 10 + '0';
+        p_number[i * 4 + 3] = i % 10 + '0';
+    }
+    // build hepler buffer - assume at most one gpu list section for now
     int listds_length = 0;
     std::string listds_source;
     for(auto& ds : m_cfg->gpu_sections)
@@ -263,18 +281,10 @@ void Decoder::decode(int platform_index, int device_index)
         }
     }
     long list_length = listds_length * m_cfg->sources[listds_source].size();
-    long numbers_length = 10000 * 4;
-    char* p_helper = new char[numbers_length + list_length];
-    for (size_t i = 0; i < 10000; i++)
-    {
-        p_helper[i * 4 + 0] = i / 1000 + '0';
-        p_helper[i * 4 + 1] = i / 100 % 10 + '0';
-        p_helper[i * 4 + 2] = i / 10 % 10 + '0';
-        p_helper[i * 4 + 3] = i % 10 + '0';
-    }
+    char* p_helper = new char[list_length];
     if (list_length > 0)
     {
-        long offset = numbers_length;
+        long offset = 0;
         for(auto& s : m_cfg->sources[listds_source])
         {
             for(int i = 0; i < listds_length; i++)
@@ -283,40 +293,13 @@ void Decoder::decode(int platform_index, int device_index)
             }
         }
     }
-    kernel->create_helper_buffer(p_helper, numbers_length + list_length);
+
+    // create buffers
+    kernel->create_buffers(p_hash, p_number, p_helper, m_dedup_len, data_length, numbers_length);
+
+    delete[] p_hash;
+    delete[] p_number;
     delete[] p_helper;
-
-    // params buffer    
-    // params
-    // 0 : decode count
-    // 1 : hash count
-    // 2 : data length
-    // 3 : x index 
-    // 4 : x length
-    // 5 : x type
-    // 6 : y index 
-    // 7 : y length
-    // 8 : y type
-    // 9 : z index 
-    // 10 : z length
-    // 11 : z type
-    auto params = new int[PARAM_LEN];
-    params[0] = 0;
-    params[1] = m_dedup_len;
-    params[2] = data_length;
-    int offset = 3;
-    for(auto &ds: m_cfg->gpu_sections)
-    {
-        params[offset] = ds.index;
-        params[offset + 1] = ds.length;
-        params[offset + 2] = ds.type;
-        offset += 3;
-    }
-    kernel->create_params_buffer(params, PARAM_LEN * sizeof(int));
-    delete[] params;
-
-    // input buffer
-    kernel->create_input_buffer(data_length);
 
     if (!m_benchmark)
     {

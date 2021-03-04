@@ -8,12 +8,12 @@
 
 #define HASH_LEN 32
 #define BLOCK_LEN 64 // In bytes
-#define STATE_LEN 4  // In words
+#define STATE_LEN 2  // In dwords
 #define PARAM_LEN 12
 
 typedef struct
 {
-    uint32_t value[STATE_LEN];
+    uint64_t value[STATE_LEN];
 } Hash;
 
 typedef struct
@@ -57,7 +57,7 @@ private:
     void hex_to_bytes(uint8_t *to, const char *from, int len);
     void update_hash(const char *hash_string, int index);
     void parse_hash_string(const char *s);
-    static int compare_hash_binary(const uint32_t *a, const uint32_t *b);
+    static int compare_hash_binary(const uint64_t *a, const uint64_t *b);
     static bool compare_hash(SortedHash &a, SortedHash &b);
     void dedup_sorted_hash();
     bool run_in_host(Kernel *kernel, uint8_t *params, int index);

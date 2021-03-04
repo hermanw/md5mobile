@@ -1,43 +1,17 @@
 #define BLOCK_LEN 64 // In bytes
 #define LENGTH_SIZE 8 // In bytes
 
-static int compare_hash(uint4* a, uint4* b)
-{
-    if(a->x < b->x) return -1;
-    if(a->x > b->x) return 1;
-    if(a->y < b->y) return -1;
-    if(a->y > b->y) return 1;
-    if(a->z < b->z) return -1;
-    if(a->z > b->z) return 1;
-    if(a->w < b->w) return -1;
-    if(a->w > b->w) return 1;
-    return 0;
-}
-
-static bool binary_search(__global const uint4* p_hash, int len, uint4* bhash, uint* index)
-{
-    int low = 0, high = len - 1, mid;
-    while (low <= high)
-    {
-        mid = (low + high) / 2;
-        uint4 ahash = p_hash[mid];
-        int r = compare_hash(&ahash, bhash);
-        if (r == 0)
-        {
-            *index = (uint)mid;
-            return true;
-        }
-        else if (r < 0)
-        {
-            low = mid + 1;
-        }
-        else
-        {
-            high = mid - 1;
-        }
-    }
-    return false;
-}
+// macro from compiler
+// #define DATA_LENGTH 18
+// #define X_INDEX 0
+// #define X_LENGTH 6
+// #define X_TYPE 0
+// #define Y_INDEX 6
+// #define Y_LENGTH 3
+// #define Y_TYPE 1
+// #define Z_INDEX 0
+// #define Z_LENGTH 0
+// #define Z_TYPE 0
 
 static void md5_compress(uint4* state, const uchar block[64])
 {
@@ -135,59 +109,107 @@ static void md5_compress(uint4* state, const uchar block[64])
     state->s3 += d;
 }
 
-static void fill_data(uchar* data, __global uchar* p_helper, uint global_id, uint index, uint length, uint type)
-{
-    if (length == 0) return;
-
-    if (type == 0) // ds_type_list
-    {
-        uint offset = 40000 + global_id * length;
-        for (uint i = 0; i < length; i++)
-        {
-            data[index + i] = p_helper[offset + i];
-        }
-    }
-    else if (type == 1) // ds_type_digit
-    {
-        uint offset = (global_id << 2) + 4 - length;
-        for (uint i = 0; i < length; i++) {
-            data[index + i] = p_helper[offset + i];
-        }
-    }
-}
-
-__kernel void compute(__global uint4* p_hash,
+__kernel void compute(
+    __global int* p_count,
     __global uchar* p_data,
-    __global uchar* p_helper,
-    __global uint* params,
-    __global uchar* input)
+    __constant ulong2* p_hash,
+    __constant uchar* p_number,
+    __constant uchar* p_helper,
+    __constant uchar* input,
+    int hash_len)
 {
-    if(params[0] >= params[1]) return;
-
-    uchar data[BLOCK_LEN]= {0};
-    uint4 hash = (uint4)(0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476);
+    if(*p_count >= hash_len) return;
 
     // fill data
-    uint data_length = params[2];
-    data[data_length] = 0x80;
-    data[BLOCK_LEN - LENGTH_SIZE] = (uchar)(data_length << 3);
-    for (uint i = 0; i < data_length; i++) {
+    uchar data[BLOCK_LEN]= {0};
+    data[DATA_LENGTH] = 0x80;
+    data[BLOCK_LEN - LENGTH_SIZE] = (uchar)(DATA_LENGTH << 3);
+    for (int i = 0; i < DATA_LENGTH; i++) {
         data[i] = input[i];
     }
-    fill_data(data, p_helper, get_global_id(0), params[3], params[4], params[5]);
-    fill_data(data, p_helper, get_global_id(1), params[6], params[7], params[8]);
-    fill_data(data, p_helper, get_global_id(2), params[9], params[10], params[11]);
+
+#ifdef X_TYPE
+#if X_TYPE == 0
+    uint x_offset = get_global_id(0) * X_LENGTH;
+    for (uint i = 0; i < X_LENGTH; i++)
+    {
+        data[X_INDEX + i] = p_helper[x_offset + i];
+    }
+#elif X_TYPE == 1
+    uint x_offset = (get_global_id(0) << 2) + 4 - X_LENGTH;
+    for (uint i = 0; i < X_LENGTH; i++)
+    {
+        data[X_INDEX + i] = p_number[x_offset + i];
+    }
+#endif
+#endif
+
+#ifdef Y_TYPE
+#if Y_TYPE == 0
+    uint y_offset = get_global_id(1) * Y_LENGTH;
+    for (uint i = 0; i < Y_LENGTH; i++)
+    {
+        data[Y_INDEX + i] = p_helper[y_offset + i];
+    }
+#elif Y_TYPE == 1
+    uint y_offset = (get_global_id(1) << 2) + 4 - Y_LENGTH;
+    for (uint i = 0; i < Y_LENGTH; i++)
+    {
+        data[Y_INDEX + i] = p_number[y_offset + i];
+    }
+#endif
+#endif
+
+#ifdef Z_TYPE
+#if Z_TYPE == 0
+    uint z_offset = get_global_id(2) * Z_LENGTH;
+    for (uint i = 0; i < Z_LENGTH; i++)
+    {
+        data[Z_INDEX + i] = p_helper[z_offset + i];
+    }
+#elif Z_TYPE == 1
+    uint z_offset = (get_global_id(2) << 2) + 4 - Z_LENGTH;
+    for (uint i = 0; i < Z_LENGTH; i++)
+    {
+        data[Z_INDEX + i] = p_number[z_offset + i];
+    }
+#endif
+#endif
+
+    // hash
+    uint4 hash = (uint4)(0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476);
 
     md5_compress(&hash, data);
 
-    uint hash_index = 0;
-    if (binary_search(p_hash, (int)params[1], &hash, &hash_index))
+    ulong2 bhash = as_ulong2(hash);
+    int low = 0;
+    int high = hash_len - 1;
+    do
     {
-        atomic_inc(params);
-        uint offset = hash_index * data_length;
-        for (uint j = 0; j < data_length; j++)
+        int mid = (low + high) / 2;
+        ulong2 ahash = p_hash[mid];
+        if(ahash.s0 < bhash.s0)
         {
-            p_data[offset + j] = data[j];
+            low = mid + 1;
         }
-    }
+        else if (ahash.s0 > bhash.s0)
+        {
+            high = mid - 1;
+        }
+        else
+        {
+            if(ahash.s1 < bhash.s1) {low = mid + 1;}
+            else if (ahash.s1 > bhash.s1) {high = mid - 1;}
+            else
+            {
+                atomic_inc(p_count);
+                int offset = mid * DATA_LENGTH;
+                for (int j = 0; j < DATA_LENGTH; j++)
+                {
+                    p_data[offset + j] = data[j];
+                }
+                break;
+            }
+        }
+    } while (low <= high);
 }

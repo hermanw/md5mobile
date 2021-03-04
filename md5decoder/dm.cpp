@@ -35,7 +35,7 @@ void write_to_file(const std::string &filename, std::string &str)
 
 void print_version()
 {
-    std::cout << "md5 decoder [opencl] 1.0, by herman\n";
+    std::cout << "md5 decoder [opencl] 1.2, by herman\n";
 }
 
 void print_info()
