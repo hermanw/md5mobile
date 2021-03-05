@@ -10,9 +10,9 @@ static const char *const compute_cl = R"(
 // #define Y_INDEX 6
 // #define Y_LENGTH 3
 // #define Y_TYPE 1
-// #define Z_INDEX 0
-// #define Z_LENGTH 0
-// #define Z_TYPE 0
+// #define Z_INDEX 17
+// #define Z_LENGTH 1
+// #define Z_TYPE 2
 
 static void md5_compress(uint4* state, const uchar block[64])
 {
@@ -174,6 +174,18 @@ __kernel void compute(
     {
         data[Z_INDEX + i] = p_number[z_offset + i];
     }
+#elif Z_TYPE == 2
+    const uchar COE[17] = {7,9,10,5,8,4,2,1,6,3,7,9,10,5,8,4,2};
+    const uchar C_SUM[11] = {'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'X'};
+    uint sum = 0;
+    for (uint i = 0; i < 17; i++)
+    {
+        sum += (data[i] - '0') * COE[i];
+    }
+    uint r = sum % 11;
+    r = 12 - r;
+    r = select(r, r-11, r>10);
+    data[Z_INDEX] =C_SUM[r];
 #endif
 #endif
 

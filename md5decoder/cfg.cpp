@@ -65,6 +65,10 @@ void Cfg::set_data_section(DataSection &ds, nlohmann::json &item)
     {
         ds.type =  ds_type_digit;
     }
+    else if(type == "idsum")
+    {
+        ds.type =  ds_type_idsum;
+    }
     else if(type == "char")
     {
         ds.type =  ds_type_char;
