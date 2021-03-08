@@ -113,7 +113,7 @@ static void md5_compress(uint4* state, const uchar block[64])
 __kernel void compute(
     __global int* p_count,
     __global uchar* p_data,
-    __constant ulong2* p_hash,
+    __global const ulong2* p_hash,
     __constant uchar* p_number,
     __constant uchar* p_helper,
     __constant uchar* input,

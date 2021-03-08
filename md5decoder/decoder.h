@@ -9,7 +9,6 @@
 #define HASH_LEN 32
 #define BLOCK_LEN 64 // In bytes
 #define STATE_LEN 2  // In dwords
-#define PARAM_LEN 12
 
 typedef struct
 {
