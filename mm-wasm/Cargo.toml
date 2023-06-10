@@ -7,6 +7,7 @@ edition = "2018"
 [dependencies]
 md5 = "0.6.1"
 hex = "0.3.2"
+wasm-bindgen = "0.2.86"
 
 [lib]
 crate-type =["cdylib"]

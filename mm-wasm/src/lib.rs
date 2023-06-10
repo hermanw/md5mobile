@@ -1,33 +1,34 @@
+use wasm_bindgen::prelude::*;
 use std::mem;
 use std::ffi::{CString, CStr};
 use std::os::raw::{c_char, c_void};
 
 mod decoder;
 
-#[no_mangle]
-pub extern "C" fn alloc(size: usize) -> *mut c_void {
+#[wasm_bindgen]
+pub fn alloc(size: usize) -> *mut c_void {
     let mut buf = Vec::with_capacity(size);
     let ptr = buf.as_mut_ptr();
     mem::forget(buf);
     return ptr as *mut c_void;
 }
 
-#[no_mangle]
-pub extern "C" fn dealloc(ptr: *mut c_void, cap: usize) {
+#[wasm_bindgen]
+pub fn dealloc(ptr: *mut c_void, cap: usize) {
     unsafe  {
         let _buf = Vec::from_raw_parts(ptr, 0, cap);
     }
 }
 
-#[no_mangle]
-pub extern "C" fn dealloc_str(ptr: *mut c_char) {
+#[wasm_bindgen]
+pub fn dealloc_str(ptr: *mut c_char) {
     unsafe {
         let _ = CString::from_raw(ptr);
     }
 }
 
-#[no_mangle]
-pub extern "C" fn validate(data: *mut c_char) -> usize {
+#[wasm_bindgen]
+pub fn validate(data: *mut c_char) -> usize {
     prep(data).len()
 }
 
@@ -50,8 +51,8 @@ fn prep(data: *mut c_char) -> Vec<(String, u64, u32)> {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn decode(data: *mut c_char, thread_num: usize, threadid: usize) {
+#[wasm_bindgen]
+pub fn decode(data: *mut c_char, thread_num: usize, threadid: usize) {
     let v_hash = prep(data);
     decoder::decode(v_hash, thread_num, threadid);
 }

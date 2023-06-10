@@ -1,2 +1,3 @@
-cargo build --target wasm32-unknown-unknown --release
-wasm-gc target/wasm32-unknown-unknown/release/mm.wasm -o ../../hermanw.github.io/md5mobile/mm.wasm
+wasm-pack build --target web
+cp pkg/mm.js ../../hermanw.github.io/md5decoder
+cp pkg/mm_bg.wasm ../../hermanw.github.io/md5decoder

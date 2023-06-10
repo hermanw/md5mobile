@@ -1,7 +1,9 @@
+use wasm_bindgen::prelude::*;
 use std::os::raw::c_char;
 use std::ffi::CString;
 
-extern {
+#[wasm_bindgen(raw_module = "./worker.js")]
+extern "C" {
     fn sendProgress(i:usize, hash: *const c_char, mobile: *const c_char);
     #[allow(dead_code)]
     fn printToJS(log: *const c_char);
@@ -10,17 +12,13 @@ extern {
 pub fn send_progress(i:usize, hash:&String, mobile: u64) {
     let h = CString::new(hash.to_string()).unwrap().into_raw();
     let m = CString::new(mobile.to_string()).unwrap().into_raw();
-    unsafe{
-        sendProgress(i, h, m);
-    }
+    sendProgress(i, h, m);
 }
 
 #[allow(unused_variables)]
 pub fn print_jslog(log: String) {
     // let s = CString::new(log).unwrap().into_raw();
-    // unsafe{
-    //     printToJS(s);
-    // }
+    // printToJS(s);
 }
 
 const PREFIX_LIST: [u64; 46] = [
