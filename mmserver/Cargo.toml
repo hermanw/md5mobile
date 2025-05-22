@@ -8,6 +8,7 @@ edition = "2018"
 
 [dependencies]
 actix-web = "4.3.1"
+time = "0.3.41"
 md5 = "0.7.0"
 buffered-reader = "1.2.0"
 byteorder = "1.4.3"
